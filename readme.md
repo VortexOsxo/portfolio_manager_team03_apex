@@ -1,3 +1,3 @@
-Hello World
-Leonardo Changes
-One more change of Leonardo
+## Portfolio Manager Project
+Made for the CS Fundamental program
+by Eduardo, Leonardo and Philippe
