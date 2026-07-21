@@ -1,0 +1,8 @@
+CREATE DATABASE IF NOT EXISTS portfolio_db;
+
+USE portfolio_db;
+
+CREATE TABLE IF NOT EXISTS stocks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    symbol VARCHAR(10) NOT NULL UNIQUE
+);
