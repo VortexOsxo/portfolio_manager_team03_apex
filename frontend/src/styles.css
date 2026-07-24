@@ -214,9 +214,78 @@
   .positive {
     color: #087f5b;
   }
-  
+
   .negative {
     color: #c92a2a;
+  }
+
+  .error {
+    color: #c92a2a;
+    font-size: 0.9rem;
+  }
+
+  .trade-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(65, 35, 76, 0.16);
+  }
+
+  .trade-form h3 {
+    margin: 0;
+    font-size: 1rem;
+    flex-basis: 100%;
+  }
+
+  .trade-toggle {
+    display: flex;
+    border: 1px solid rgba(65, 35, 76, 0.2);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .trade-toggle button {
+    padding: 8px 16px;
+    border: 0;
+    background: transparent;
+    color: #4f4153;
+    cursor: pointer;
+  }
+
+  .trade-toggle button.active {
+    background: #312e81;
+    color: white;
+  }
+
+  .trade-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .trade-fields input {
+    padding: 9px 12px;
+    border: 1px solid rgba(65, 35, 76, 0.2);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.7);
+  }
+
+  .trade-fields button {
+    padding: 9px 18px;
+    border: 0;
+    border-radius: 8px;
+    background: #312e81;
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .trade-fields button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
   
   @media (max-width: 700px) {
