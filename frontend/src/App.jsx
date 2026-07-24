@@ -80,7 +80,7 @@ function App() {
                 <tr>
                   <th>Ticker</th>
                   <th>Amount</th>
-                  <th>Cost </th>
+                  <th>Cost</th>
                   <th>Purchase date</th>
                 </tr>
               </thead>
