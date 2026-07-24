@@ -1,38 +1,62 @@
 from flask import Blueprint, jsonify, request
+import mysql
 
-from flaskr.database import get_db_connection
+from flaskr.services.database import get_transactions, buy_holding, sell_holding
 
 stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
 
 
-@stocks_bp.get("/test")
-def test_stocks():
-    return "Stocks API test is working!", 200
-
 @stocks_bp.get("/")
 def get_stocks():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT symbol FROM stocks")
-    stocks = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return jsonify([stock[0] for stock in stocks])
+    transactions = get_transactions()
+    stocks = {}
+    for transaction in transactions:
+        ticker = transaction['ticker']
+        name = transaction['name']
+        amount = transaction['amount']
 
-@stocks_bp.post("")
-def add_stock():
+        if ticker not in stocks:
+            stocks[ticker] = {
+                'ticker': ticker,
+                'name': name,
+                'amount': 0,
+            }
+
+        stocks[ticker]['amount'] += amount
+    return jsonify(stocks), 200
+
+@stocks_bp.post("/buy")
+def buy_stock():
     data = request.get_json()
-    symbol = data.get("symbol")
+    ticker = data.get("ticker")
+    amount = data.get("amount")
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO stocks (symbol) VALUES (%s)",
-        (symbol,)
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
+    if ticker is None or amount is None:
+        return "", 400
 
-    return jsonify({"message": "Stock added successfully"}), 201
+    cost_basis = data.get("cost_basis")
+    transaction_date = data.get("transaction_date")
+    try: 
+        buy_holding(ticker, amount, cost_basis, transaction_date)
+    except mysql.connector.errors.IntegrityError as e:
+        return "", 400
 
+    return jsonify({"message": "Stock bought successfully"}), 201
+
+@stocks_bp.post("/sell")
+def sell_stock():
+    data = request.get_json()
+    ticker = data.get("ticker")
+    amount = data.get("amount")
+
+    if ticker is None or amount is None:
+        return "", 400
+
+    cost_basis = data.get("cost_basis")
+    transaction_date = data.get("transaction_date")
+    try: 
+        sell_holding(ticker, amount, cost_basis, transaction_date)
+    except mysql.connector.errors.IntegrityError as e:
+        return "", 400
+
+    return jsonify({"message": "Stock sold successfully"}), 201
