@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 import mysql
 
 from flaskr.services.database import get_transactions, buy_holding, sell_holding
+from flaskr.yahoo_finance import YahooFinanceStock
 
 stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
 
