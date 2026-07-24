@@ -5,7 +5,12 @@ BASE_URL = "http://127.0.0.1:5000"
 # POST request
 post_response = requests.post(
     f"{BASE_URL}/stocks",
-    json={"symbol": "SPCX"}
+    json={
+        "ticker": "SPCX",
+        "amount": 5,
+        "cost_basis": 100,
+        "purchase_date": "2026-07-24",
+    }
 )
 print("POST status:", post_response.status_code)
 print("POST body:", post_response.text)

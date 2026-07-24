@@ -17,27 +17,46 @@ def get_ticker_info(ticker):
 @stocks_bp.get("/")
 def get_stocks():
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT symbol FROM stocks")
-    stocks = cursor.fetchall()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute(
+        """
+        SELECT holding_id, ticker, amount, cost_basis, purchase_date
+        FROM holdings
+        """
+    )
+    holdings = cursor.fetchall()
     cursor.close()
     conn.close()
-    return jsonify([stock[0] for stock in stocks])
+    return jsonify(holdings)
 
 @stocks_bp.post("")
 def add_stock():
     data = request.get_json()
-    symbol = data.get("symbol")
+    ticker = data.get("ticker")
+    amount = data.get("amount")
+    cost_basis = data.get("cost_basis")
+    purchase_date = data.get("purchase_date")
 
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO stocks (symbol) VALUES (%s)",
-        (symbol,)
+        """
+        INSERT INTO holdings (ticker, amount, cost_basis, purchase_date)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (ticker, amount, cost_basis, purchase_date)
     )
     conn.commit()
+    holding_id = cursor.lastrowid
     cursor.close()
     conn.close()
 
-    return jsonify({"message": "Stock added successfully"}), 201
-
+    return jsonify(
+        {
+            "holding_id": holding_id,
+            "ticker": ticker,
+            "amount": amount,
+            "cost_basis": cost_basis,
+            "purchase_date": purchase_date,
+        }
+    ), 201
