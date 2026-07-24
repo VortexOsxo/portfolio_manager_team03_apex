@@ -1,4 +1,4 @@
-// Holding data is hardcore just o try out how it looks
+// Holding data is hardcoded just to try out how it looks
 const holdings = [
   {
     holding_id: 1,
