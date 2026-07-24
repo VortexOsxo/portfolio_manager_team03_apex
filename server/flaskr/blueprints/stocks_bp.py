@@ -24,6 +24,12 @@ def get_stocks():
             }
 
         stocks[ticker]['amount'] += amount
+
+    for ticker, stock in stocks.items():
+        current_price = YahooFinanceStock(ticker).get_info()["current_price"]
+        stock['current_price'] = current_price
+        stock['value'] = round(float(stock['amount']) * current_price, 2) if current_price is not None else None
+
     return jsonify(stocks), 200
 
 @stocks_bp.post("/buy")

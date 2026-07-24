@@ -1,29 +1,57 @@
-// Holding data is hardcoded just to try out how it looks
-const holdings = [
-  {
-    holding_id: 1,
-    ticker: "TSLA",
-    amount: 50,
-    cost_basis: 225.4,
-    purchase_date: "2026-07-01",
-  },
-  {
-    holding_id: 2,
-    ticker: "AAPL",
-    amount: 120,
-    cost_basis: 190.25,
-    purchase_date: "2026-07-10",
-  },
-  {
-    holding_id: 3,
-    ticker: "MSFT",
-    amount: 85,
-    cost_basis: 480.75,
-    purchase_date: "2026-07-18",
-  },
-];
+import { useEffect, useState } from "react";
 
 function App() {
+  const [holdings, setHoldings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const [tradeType, setTradeType] = useState("buy");
+  const [ticker, setTicker] = useState("");
+  const [amount, setAmount] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [tradeError, setTradeError] = useState(null);
+
+  const fetchHoldings = () => {
+    setLoading(true);
+    fetch("/api/stocks/")
+      .then((res) => {
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => setHoldings(Object.values(data)))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchHoldings();
+  }, []);
+
+  const totalValue = holdings.reduce((sum, h) => sum + (h.value ?? 0), 0);
+
+  const handleTrade = (e) => {
+    e.preventDefault();
+    setTradeError(null);
+    setSubmitting(true);
+
+    fetch(`/api/stocks/${tradeType}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: ticker.toUpperCase(), amount: Number(amount) }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`${tradeType} failed (status ${res.status})`);
+        return res.json();
+      })
+      .then(() => {
+        setTicker("");
+        setAmount("");
+        fetchHoldings();
+      })
+      .catch((err) => setTradeError(err.message))
+      .finally(() => setSubmitting(false));
+  };
+
   return (
     <div className="app-shell">
       <header className="navbar">
@@ -37,7 +65,7 @@ function App() {
           </a>
 
           <a className="nav-link" href="#holdings">
-            Holdings (coming soon)
+            Holdings
           </a>
 
           <a className="nav-link" href="#performance">
@@ -59,7 +87,7 @@ function App() {
         <section className="summary-grid" aria-label="Portfolio summary">
           <article className="summary-card">
             <p className="summary-label">Total value</p>
-            <p className="summary-value">-</p>
+            <p className="summary-value">${totalValue.toFixed(2)}</p>
           </article>
 
           <article className="summary-card">
@@ -71,32 +99,86 @@ function App() {
         <section className="holdings-card" id="holdings">
           <div className="card-heading">
             <h2>Current holdings</h2>
-            <p>{holdings.length} positions (dummy data)</p>
+            <p>{holdings.length} positions</p>
           </div>
 
           <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Amount</th>
-                  <th>Cost</th>
-                  <th>Purchase date</th>
-                </tr>
-              </thead>
+            {loading && <p>Loading...</p>}
+            {error && <p className="error">Failed to load holdings: {error}</p>}
 
-              <tbody>
-                {holdings.map((holding) => (
-                  <tr key={holding.holding_id}>
-                    <td className="ticker">{holding.ticker}</td>
-                    <td>{holding.amount}</td>
-                    <td>${Number(holding.cost_basis).toFixed(2)}</td>
-                    <td>{holding.purchase_date}</td>
+            {!loading && !error && (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Name</th>
+                    <th>Amount</th>
+                    <th>Price</th>
+                    <th>Value</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+
+                <tbody>
+                  {holdings.map((holding) => (
+                    <tr key={holding.ticker}>
+                      <td className="ticker">{holding.ticker}</td>
+                      <td>{holding.name}</td>
+                      <td>{holding.amount}</td>
+                      <td>{holding.current_price != null ? `$${Number(holding.current_price).toFixed(2)}` : "—"}</td>
+                      <td>{holding.value != null ? `$${Number(holding.value).toFixed(2)}` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
+
+          <form className="trade-form" onSubmit={handleTrade}>
+            <h3>Buy / Sell</h3>
+
+            <div className="trade-toggle">
+              <button
+                type="button"
+                className={tradeType === "buy" ? "active" : ""}
+                onClick={() => setTradeType("buy")}
+              >
+                Buy
+              </button>
+              <button
+                type="button"
+                className={tradeType === "sell" ? "active" : ""}
+                onClick={() => setTradeType("sell")}
+              >
+                Sell
+              </button>
+            </div>
+
+            <div className="trade-fields">
+              <input
+                type="text"
+                placeholder="Ticker (e.g. AAPL)"
+                value={ticker}
+                onChange={(e) => setTicker(e.target.value)}
+                required
+              />
+
+              <input
+                type="number"
+                placeholder="Amount"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                min="0"
+                step="any"
+                required
+              />
+
+              <button type="submit" disabled={submitting}>
+                {submitting ? "Submitting..." : tradeType === "buy" ? "Buy" : "Sell"}
+              </button>
+            </div>
+
+            {tradeError && <p className="error">{tradeError}</p>}
+          </form>
         </section>
       </main>
     </div>
