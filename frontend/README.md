@@ -12,6 +12,8 @@ From project root:
 cd frontend 
 npm install
 
-## Run 
+## Run the development server
 
 npm run dev 
+
+## Run a production build 
