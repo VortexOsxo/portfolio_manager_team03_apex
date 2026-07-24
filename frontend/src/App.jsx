@@ -1,4 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+// Small set for the ticker autocomplete. Later inteded to be replaced with an API call
+const KNOWN_TICKERS = [
+  { ticker: "AAPL", name: "Apple Inc." },
+  { ticker: "MSFT", name: "Microsoft Corporation" },
+  { ticker: "GOOGL", name: "Alphabet Inc." },
+  { ticker: "AMZN", name: "Amazon.com Inc." },
+  { ticker: "NVDA", name: "NVIDIA Corporation" },
+  { ticker: "TSLA", name: "Tesla Inc." },
+  { ticker: "META", name: "Meta Platforms Inc." },
+  { ticker: "NFLX", name: "Netflix Inc." },
+  { ticker: "AMD", name: "Advanced Micro Devices Inc." },
+  { ticker: "INTC", name: "Intel Corporation" },
+  { ticker: "DIS", name: "The Walt Disney Company" },
+  { ticker: "V", name: "Visa Inc." },
+  { ticker: "JPM", name: "JPMorgan Chase & Co." },
+  { ticker: "KO", name: "The Coca-Cola Company" },
+  { ticker: "PEP", name: "PepsiCo Inc." },
+];
 
 function App() {
   const [holdings, setHoldings] = useState([]);
@@ -29,8 +48,31 @@ function App() {
 
   const totalValue = holdings.reduce((sum, h) => sum + (h.value ?? 0), 0);
 
+  const tickerOptions = useMemo(() => {
+    const known = KNOWN_TICKERS.map((t) => t.ticker);
+    const owned = holdings.map((h) => h.ticker);
+    return Array.from(new Set([...known, ...owned])).sort();
+  }, [holdings]);
+
+  const isValidTicker = tickerOptions.includes(ticker.toUpperCase());
+
+  const handleTickerChange = (e) => {
+    setTicker(e.target.value.toUpperCase());
+  };
+
+  const handleAmountChange = (e) => {
+    const value = e.target.value;
+    if (/^\d*\.?\d*$/.test(value)) {
+      setAmount(value);
+    }
+  };
+
   const handleTrade = (e) => {
     e.preventDefault();
+    if (!isValidTicker) {
+      setTradeError("Pick a ticker from the list");
+      return;
+    }
     setTradeError(null);
     setSubmitting(true);
 
@@ -39,9 +81,10 @@ function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ticker: ticker.toUpperCase(), amount: Number(amount) }),
     })
-      .then((res) => {
-        if (!res.ok) throw new Error(`${tradeType} failed (status ${res.status})`);
-        return res.json();
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `${tradeType} failed (status ${res.status})`);
+        return body;
       })
       .then(() => {
         setTicker("");
@@ -123,7 +166,7 @@ function App() {
                     <tr key={holding.ticker}>
                       <td className="ticker">{holding.ticker}</td>
                       <td>{holding.name}</td>
-                      <td>{holding.amount}</td>
+                      <td>{Number(holding.amount)}</td>
                       <td>{holding.current_price != null ? `$${Number(holding.current_price).toFixed(2)}` : "—"}</td>
                       <td>{holding.value != null ? `$${Number(holding.value).toFixed(2)}` : "—"}</td>
                     </tr>
@@ -156,27 +199,36 @@ function App() {
             <div className="trade-fields">
               <input
                 type="text"
+                list="ticker-options"
                 placeholder="Ticker (e.g. AAPL)"
                 value={ticker}
-                onChange={(e) => setTicker(e.target.value)}
+                onChange={handleTickerChange}
+                autoComplete="off"
                 required
               />
+              <datalist id="ticker-options">
+                {tickerOptions.map((t) => (
+                  <option key={t} value={t} />
+                ))}
+              </datalist>
 
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 placeholder="Amount"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                min="0"
-                step="any"
+                onChange={handleAmountChange}
                 required
               />
 
-              <button type="submit" disabled={submitting}>
+              <button type="submit" disabled={submitting || !isValidTicker || !amount}>
                 {submitting ? "Submitting..." : tradeType === "buy" ? "Buy" : "Sell"}
               </button>
             </div>
 
+            {ticker && !isValidTicker && (
+              <p className="error">"{ticker}" isn't a recognized ticker</p>
+            )}
             {tradeError && <p className="error">{tradeError}</p>}
           </form>
         </section>
