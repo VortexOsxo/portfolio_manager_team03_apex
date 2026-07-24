@@ -3,7 +3,7 @@ from datetime import datetime
 
 
 from flaskr.config import DB_CONFIG
-from flaskr.services.yahoo_api_service import YahooApiService
+from flaskr.yahoo_finance import YahooFinanceStock
 
 def get_db_connection():
     return mysql.connector.connect(
@@ -38,7 +38,8 @@ def get_transactions():
     holdings = read_query(query)
     for holding in holdings:
         ticker, amount, cost_basis, transaction_date = holding
-        name = YahooApiService.get_stock_name(ticker)
+        info = YahooFinanceStock(ticker).get_info()
+        name = info["company_name"]
 
         map_holdings.append({
             'ticker': ticker, 
@@ -55,8 +56,8 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         transaction_date = datetime.now().date()
 
     if cost_basis is None:
-        cost_basis = YahooApiService.get_stock_price(ticker, transaction_date)
-    
+        cost_basis = YahooFinanceStock(ticker).get_price_on_date(transaction_date)
+
     write_query(
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
         (ticker, amount, cost_basis, transaction_date)
@@ -68,7 +69,7 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
         transaction_date = datetime.now().date()
 
     if cost_basis is None:
-        cost_basis = YahooApiService.get_stock_price(ticker, transaction_date)
+        cost_basis = YahooFinanceStock(ticker).get_price_on_date(transaction_date)
 
     write_query(
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
