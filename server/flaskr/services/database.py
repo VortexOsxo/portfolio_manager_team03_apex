@@ -63,8 +63,17 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         (ticker, amount, cost_basis, transaction_date)
     )
 
+def get_holding_amount(ticker):
+    query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s;"
+    result = read_query(query, (ticker,))
+    return result[0][0]
+
 def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
-    amount = -abs(amount)
+    amount = abs(amount)
+    current_amount = get_holding_amount(ticker)
+    if amount > current_amount:
+        raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
+
     if transaction_date is None:
         transaction_date = datetime.now().date()
 
@@ -73,5 +82,5 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
 
     write_query(
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
-        (ticker, amount, 0, transaction_date)
+        (ticker, -amount, 0, transaction_date)
     )

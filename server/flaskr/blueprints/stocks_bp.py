@@ -25,6 +25,8 @@ def get_stocks():
 
         stocks[ticker]['amount'] += amount
 
+    stocks = {ticker: stock for ticker, stock in stocks.items() if stock['amount'] != 0}
+
     for ticker, stock in stocks.items():
         current_price = YahooFinanceStock(ticker).get_info()["current_price"]
         stock['current_price'] = current_price
@@ -61,9 +63,11 @@ def sell_stock():
 
     cost_basis = data.get("cost_basis")
     transaction_date = data.get("transaction_date")
-    try: 
+    try:
         sell_holding(ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError as e:
         return "", 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     return jsonify({"message": "Stock sold successfully"}), 201
