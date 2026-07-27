@@ -1,5 +1,6 @@
 import mysql.connector
 from datetime import datetime
+from decimal import Decimal
 
 
 from flaskr.config import DB_CONFIG
@@ -67,8 +68,8 @@ def get_holding_amount(ticker):
     return result[0][0]
 
 def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
-    amount = abs(amount)
-    current_amount = get_holding_amount(ticker)
+    amount = abs(Decimal(str(amount)))
+    current_amount = Decimal(str(get_holding_amount(ticker)))
     if amount > current_amount:
         raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
 
