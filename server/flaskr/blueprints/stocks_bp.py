@@ -20,8 +20,7 @@ def _build_holdings():
         ticker = tx['ticker']
         amounts[ticker] = amounts.get(ticker, 0) + float(tx['amount'])
 
-    avg_costs = performance.compute_avg_cost(transactions)
-    realized = performance.realized_pnl(transactions, avg_costs)
+    avg_costs, realized = performance.compute_positions(transactions)
 
     holdings = {}
     for ticker, amount in amounts.items():

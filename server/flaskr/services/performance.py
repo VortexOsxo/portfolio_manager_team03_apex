@@ -5,27 +5,49 @@ live market data they've already fetched.
 """
 
 
-def compute_avg_cost(transactions):
-    """Weighted average cost per share for each ticker, keyed by ticker.
+def compute_positions(transactions):
+    """Walk transactions in chronological order, tracking running average cost
+    per ticker under the average-cost method.
 
-    Only BUY rows (amount > 0) count toward average cost - under the average-cost
-    method, selling shares doesn't change the average cost of what's left.
+    A buy blends into the average cost of shares currently held; a sell is
+    realized against that running average and leaves it unchanged. Processing
+    must happen in transaction order, since the average cost after a sell
+    followed by a new buy differs from an all-time average across every buy
+    ever made.
+
+    Returns (avg_cost_by_ticker, realized_pnl_by_ticker). avg_cost_by_ticker
+    only includes tickers with a currently open position.
     """
-    cost_totals = {}
-    share_totals = {}
-    for tx in transactions:
-        if tx['amount'] <= 0:
-            continue
+    ordered = sorted(transactions, key=lambda tx: (tx['transaction_date'], tx.get('tr_id', 0)))
+
+    shares_held = {}
+    avg_cost = {}
+    realized = {}
+
+    for tx in ordered:
         ticker = tx['ticker']
         amount = float(tx['amount'])
-        cost_totals[ticker] = cost_totals.get(ticker, 0) + amount * float(tx['cost_basis'])
-        share_totals[ticker] = share_totals.get(ticker, 0) + amount
+        price = float(tx['cost_basis'])
+        held = shares_held.get(ticker, 0.0)
+        cost = avg_cost.get(ticker, 0.0)
 
-    return {
-        ticker: cost_totals[ticker] / share_totals[ticker]
-        for ticker in cost_totals
-        if share_totals[ticker] > 0
+        if amount > 0:
+            held += amount
+            cost = (cost * (held - amount) + price * amount) / held
+        else:
+            sold = -amount
+            realized[ticker] = realized.get(ticker, 0) + (price - cost) * sold
+            held += amount
+
+        shares_held[ticker] = held
+        avg_cost[ticker] = cost
+
+    open_avg_cost = {
+        ticker: cost for ticker, cost in avg_cost.items() if shares_held.get(ticker, 0) > 0
     }
+    realized = {ticker: round(value, 2) for ticker, value in realized.items()}
+
+    return open_avg_cost, realized
 
 
 def unrealized_pnl(amount_held, avg_cost, current_price):
@@ -39,28 +61,6 @@ def unrealized_pnl(amount_held, avg_cost, current_price):
         "pnl": round(pnl, 2),
         "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
     }
-
-
-def realized_pnl(transactions, avg_cost_by_ticker):
-    """Lifetime realized $ P&L per ticker from sells, keyed by ticker.
-
-    Approximate: matches each sell against the ticker's overall average buy
-    cost rather than a date-sliced FIFO lot, since average cost doesn't
-    change over time in this model.
-    """
-    totals = {}
-    for tx in transactions:
-        if tx['amount'] >= 0:
-            continue
-        ticker = tx['ticker']
-        avg_cost = avg_cost_by_ticker.get(ticker)
-        if avg_cost is None:
-            continue
-        sold_amount = -float(tx['amount'])
-        sale_price = float(tx['cost_basis'])
-        totals[ticker] = totals.get(ticker, 0) + (sale_price - avg_cost) * sold_amount
-
-    return {ticker: round(value, 2) for ticker, value in totals.items()}
 
 
 def day_change(amount_held, day_change_per_share, day_change_pct):

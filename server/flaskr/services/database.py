@@ -32,16 +32,20 @@ def read_query(query, params=None):
     return result
 
 def get_transactions():
-    query = "SELECT ticker, amount, cost_basis, transaction_date FROM transactions;"
+    query = (
+        "SELECT tr_id, ticker, amount, cost_basis, transaction_date "
+        "FROM transactions ORDER BY transaction_date, tr_id;"
+    )
 
     return [
         {
+            'tr_id': tr_id,
             'ticker': ticker,
             'amount': amount,
             'cost_basis': cost_basis,
             'transaction_date': transaction_date,
         }
-        for ticker, amount, cost_basis, transaction_date in read_query(query)
+        for tr_id, ticker, amount, cost_basis, transaction_date in read_query(query)
     ]
 
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
