@@ -50,6 +50,7 @@ function App() {
 
   const fetchHoldings = () => {
     setLoading(true);
+    setError(null);
     Promise.all([
       fetch("/api/stocks/").then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
