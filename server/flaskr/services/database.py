@@ -34,21 +34,15 @@ def read_query(query, params=None):
 def get_transactions():
     query = "SELECT ticker, amount, cost_basis, transaction_date FROM transactions;"
 
-    map_holdings = []
-    holdings = read_query(query)
-    for holding in holdings:
-        ticker, amount, cost_basis, transaction_date = holding
-        info = YahooFinanceStock(ticker).get_info()
-        name = info["company_name"]
-
-        map_holdings.append({
-            'ticker': ticker, 
-            'name': name,
+    return [
+        {
+            'ticker': ticker,
             'amount': amount,
             'cost_basis': cost_basis,
-            'transaction_date': transaction_date
-        })
-    return map_holdings
+            'transaction_date': transaction_date,
+        }
+        for ticker, amount, cost_basis, transaction_date in read_query(query)
+    ]
 
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(amount)
@@ -82,5 +76,5 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
 
     write_query(
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
-        (ticker, -amount, 0, transaction_date)
+        (ticker, -amount, cost_basis, transaction_date)
     )

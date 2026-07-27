@@ -25,7 +25,7 @@ class YahooFinanceStock:
         return default
 
     def get_info(self):
-        """Company name and current price, straight from Yahoo Finance.
+        """Company name, current price and today's change, straight from Yahoo Finance.
 
         Add more fields here as new features need them, e.g.:
         "sector": self.get_field("sector"),
@@ -34,6 +34,8 @@ class YahooFinanceStock:
             "stock_ticker": self.ticker,
             "company_name": self.get_field("longName", "shortName"),
             "current_price": self.get_field("currentPrice", "regularMarketPrice"),
+            "day_change": self.get_field("regularMarketChange"),
+            "day_change_pct": self.get_field("regularMarketChangePercent"),
         }
 
     def get_price_on_date(self, date):
