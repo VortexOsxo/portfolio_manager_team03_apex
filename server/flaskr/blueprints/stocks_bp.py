@@ -40,7 +40,7 @@ def _build_holdings():
             'amount': amount,
             'current_price': current_price,
             'value': round(amount * current_price, 2) if current_price is not None else None,
-            'avg_cost': round(avg_cost, 2) if avg_cost is not None else None,
+            'avg_cost': avg_cost,
             'unrealized_pnl': pnl["pnl"],
             'unrealized_pnl_pct': pnl["pnl_pct"],
             'day_change': change["value"],
