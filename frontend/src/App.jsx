@@ -19,8 +19,26 @@ const KNOWN_TICKERS = [
   { ticker: "PEP", name: "PepsiCo Inc." },
 ];
 
+const formatCurrency = (value) => {
+  if (value === null || value === undefined) return "—";
+  const sign = value < 0 ? "-" : "";
+  return `${sign}$${Math.abs(value).toFixed(2)}`;
+};
+
+const formatPercent = (value) => {
+  if (value === null || value === undefined) return "—";
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}%`;
+};
+
+const signClass = (value) => {
+  if (!value) return "";
+  return value > 0 ? "positive" : "negative";
+};
+
 function App() {
   const [holdings, setHoldings] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -32,12 +50,21 @@ function App() {
 
   const fetchHoldings = () => {
     setLoading(true);
-    fetch("/api/stocks/")
-      .then((res) => {
+    setError(null);
+    Promise.all([
+      fetch("/api/stocks/").then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         return res.json();
+      }),
+      fetch("/api/stocks/summary").then((res) => {
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        return res.json();
+      }),
+    ])
+      .then(([stocksData, summaryData]) => {
+        setHoldings(Object.values(stocksData));
+        setSummary(summaryData);
       })
-      .then((data) => setHoldings(Object.values(data)))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
@@ -45,8 +72,6 @@ function App() {
   useEffect(() => {
     fetchHoldings();
   }, []);
-
-  const totalValue = holdings.reduce((sum, h) => sum + (h.value ?? 0), 0);
 
   const tickerOptions = useMemo(() => {
     const known = KNOWN_TICKERS.map((t) => t.ticker);
@@ -130,12 +155,27 @@ function App() {
         <section className="summary-grid" aria-label="Portfolio summary">
           <article className="summary-card">
             <p className="summary-label">Total value</p>
-            <p className="summary-value">${totalValue.toFixed(2)}</p>
+            <p className="summary-value">{formatCurrency(summary?.total_value)}</p>
           </article>
 
           <article className="summary-card">
             <p className="summary-label">Overall return</p>
-            <p className="summary-value">—</p>
+            <p className={`summary-value ${signClass(summary?.total_unrealized_pnl)}`}>
+              {formatCurrency(summary?.total_unrealized_pnl)}
+              {summary?.total_unrealized_pnl_pct != null && (
+                <> ({formatPercent(summary.total_unrealized_pnl_pct)})</>
+              )}
+            </p>
+          </article>
+
+          <article className="summary-card">
+            <p className="summary-label">Today's change</p>
+            <p className={`summary-value ${signClass(summary?.total_day_change)}`}>
+              {formatCurrency(summary?.total_day_change)}
+              {summary?.total_day_change_pct != null && (
+                <> ({formatPercent(summary.total_day_change_pct)})</>
+              )}
+            </p>
           </article>
         </section>
 
@@ -156,8 +196,11 @@ function App() {
                     <th>Ticker</th>
                     <th>Name</th>
                     <th>Amount</th>
+                    <th>Avg cost</th>
                     <th>Price</th>
+                    <th>Day change</th>
                     <th>Value</th>
+                    <th>Unrealized P&amp;L</th>
                   </tr>
                 </thead>
 
@@ -167,8 +210,17 @@ function App() {
                       <td className="ticker">{holding.ticker}</td>
                       <td>{holding.name}</td>
                       <td>{Number(holding.amount)}</td>
-                      <td>{holding.current_price != null ? `$${Number(holding.current_price).toFixed(2)}` : "—"}</td>
-                      <td>{holding.value != null ? `$${Number(holding.value).toFixed(2)}` : "—"}</td>
+                      <td>{formatCurrency(holding.avg_cost)}</td>
+                      <td>{formatCurrency(holding.current_price)}</td>
+                      <td className={signClass(holding.day_change)}>
+                        {formatCurrency(holding.day_change)}
+                        {holding.day_change_pct != null && <> ({formatPercent(holding.day_change_pct)})</>}
+                      </td>
+                      <td>{formatCurrency(holding.value)}</td>
+                      <td className={signClass(holding.unrealized_pnl)}>
+                        {formatCurrency(holding.unrealized_pnl)}
+                        {holding.unrealized_pnl_pct != null && <> ({formatPercent(holding.unrealized_pnl_pct)})</>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

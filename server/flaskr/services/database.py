@@ -1,5 +1,6 @@
 import mysql.connector
 from datetime import datetime
+from decimal import Decimal
 
 
 from flaskr.config import DB_CONFIG
@@ -32,23 +33,21 @@ def read_query(query, params=None):
     return result
 
 def get_transactions():
-    query = "SELECT ticker, amount, cost_basis, transaction_date FROM transactions;"
+    query = (
+        "SELECT tr_id, ticker, amount, cost_basis, transaction_date "
+        "FROM transactions ORDER BY transaction_date, tr_id;"
+    )
 
-    map_holdings = []
-    holdings = read_query(query)
-    for holding in holdings:
-        ticker, amount, cost_basis, transaction_date = holding
-        info = YahooFinanceStock(ticker).get_info()
-        name = info["company_name"]
-
-        map_holdings.append({
-            'ticker': ticker, 
-            'name': name,
+    return [
+        {
+            'tr_id': tr_id,
+            'ticker': ticker,
             'amount': amount,
             'cost_basis': cost_basis,
-            'transaction_date': transaction_date
-        })
-    return map_holdings
+            'transaction_date': transaction_date,
+        }
+        for tr_id, ticker, amount, cost_basis, transaction_date in read_query(query)
+    ]
 
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(amount)
@@ -69,8 +68,8 @@ def get_holding_amount(ticker):
     return result[0][0]
 
 def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
-    amount = abs(amount)
-    current_amount = get_holding_amount(ticker)
+    amount = abs(Decimal(str(amount)))
+    current_amount = Decimal(str(get_holding_amount(ticker)))
     if amount > current_amount:
         raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
 
@@ -82,5 +81,5 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
 
     write_query(
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
-        (ticker, -amount, 0, transaction_date)
+        (ticker, -amount, cost_basis, transaction_date)
     )
