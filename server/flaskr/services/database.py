@@ -39,7 +39,7 @@ def get_transactions(ticker = None, start_date = None, end_date = None):
     )
     params = ()
     if ticker:
-        query += " WHERE ticker = %s"
+        query += " AND ticker = %s"
         params += (ticker,)
     if start_date is not None:
         query += " AND transaction_date >= %s"
