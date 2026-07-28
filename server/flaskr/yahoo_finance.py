@@ -1,6 +1,12 @@
+import time
 from datetime import datetime, timedelta
 
 import yfinance as yf
+
+# get_info() is called once per held ticker for both /stocks and /stocks/summary
+# on every page load 
+_INFO_CACHE = {}
+_INFO_CACHE_TTL_SECONDS = 30
 
 
 class YahooFinanceStock:
@@ -27,16 +33,25 @@ class YahooFinanceStock:
     def get_info(self):
         """Company name, current price and today's change, straight from Yahoo Finance.
 
+        Cached for a short TTL across requests/instances (keyed by ticker) since
+        this gets called repeatedly for the same tickers in quick succession.
+
         Add more fields here as new features need them, e.g.:
         "sector": self.get_field("sector"),
         """
-        return {
+        cached = _INFO_CACHE.get(self.ticker)
+        if cached is not None and time.time() - cached[1] < _INFO_CACHE_TTL_SECONDS:
+            return cached[0]
+
+        info = {
             "stock_ticker": self.ticker,
             "company_name": self.get_field("longName", "shortName"),
             "current_price": self.get_field("currentPrice", "regularMarketPrice"),
             "day_change": self.get_field("regularMarketChange"),
             "day_change_pct": self.get_field("regularMarketChangePercent"),
         }
+        _INFO_CACHE[self.ticker] = (info, time.time())
+        return info
 
     def get_price_on_date(self, date):
         """Closing price on a given date ("YYYY-MM-DD" string or datetime.date)."""
@@ -77,3 +92,24 @@ class YahooFinanceStock:
             interval="1d"
         )
         return history.index.strftime("%Y-%m-%d").tolist()
+
+
+def search_stocks(query, limit=8):
+    # Search for stocks by query string 
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    try:
+        quotes = yf.Search(query, max_results=limit).quotes
+    except Exception:
+        return []
+
+    return [
+        {
+            "ticker": quote["symbol"],
+            "name": quote.get("shortname") or quote.get("longname") or quote["symbol"],
+        }
+        for quote in quotes
+        if quote.get("quoteType") == "EQUITY"
+    ]

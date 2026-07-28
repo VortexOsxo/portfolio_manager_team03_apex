@@ -1,28 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-// Small set for the ticker autocomplete. Later inteded to be replaced with an API call
-const KNOWN_TICKERS = [
-  { ticker: "AAPL", name: "Apple Inc." },
-  { ticker: "MSFT", name: "Microsoft Corporation" },
-  { ticker: "GOOGL", name: "Alphabet Inc." },
-  { ticker: "AMZN", name: "Amazon.com Inc." },
-  { ticker: "NVDA", name: "NVIDIA Corporation" },
-  { ticker: "TSLA", name: "Tesla Inc." },
-  { ticker: "META", name: "Meta Platforms Inc." },
-  { ticker: "NFLX", name: "Netflix Inc." },
-  { ticker: "AMD", name: "Advanced Micro Devices Inc." },
-  { ticker: "INTC", name: "Intel Corporation" },
-  { ticker: "DIS", name: "The Walt Disney Company" },
-  { ticker: "V", name: "Visa Inc." },
-  { ticker: "JPM", name: "JPMorgan Chase & Co." },
-  { ticker: "KO", name: "The Coca-Cola Company" },
-  { ticker: "PEP", name: "PepsiCo Inc." },
-];
-
 const formatCurrency = (value) => {
   if (value === null || value === undefined) return "—";
   const sign = value < 0 ? "-" : "";
-  return `${sign}$${Math.abs(value).toFixed(2)}`;
+  const formatted = Math.abs(value).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${sign}$${formatted}`;
 };
 
 const formatPercent = (value) => {
@@ -36,6 +21,16 @@ const signClass = (value) => {
   return value > 0 ? "positive" : "negative";
 };
 
+const formatDate = (value) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return `${parsed.toLocaleDateString()} ${parsed.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+};
+
 function App() {
   const [holdings, setHoldings] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -47,6 +42,12 @@ function App() {
   const [amount, setAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [tradeError, setTradeError] = useState(null);
+  const [tickerResults, setTickerResults] = useState([]);
+
+  const [historyTicker, setHistoryTicker] = useState(null);
+  const [historyTransactions, setHistoryTransactions] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
 
   const fetchHoldings = () => {
     setLoading(true);
@@ -73,16 +74,36 @@ function App() {
     fetchHoldings();
   }, []);
 
-  const tickerOptions = useMemo(() => {
-    const known = KNOWN_TICKERS.map((t) => t.ticker);
-    const owned = holdings.map((h) => h.ticker);
-    return Array.from(new Set([...known, ...owned])).sort();
-  }, [holdings]);
+  useEffect(() => {
+    // selling only happens to what we already own, so no need to search for tickers when selling
+    if (tradeType === "sell" || !ticker.trim()) {
+      setTickerResults([]);
+      return;
+    }
 
-  const isValidTicker = tickerOptions.includes(ticker.toUpperCase());
+    const handle = setTimeout(() => {
+      fetch(`/api/stocks/search?q=${encodeURIComponent(ticker)}`)
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data) => setTickerResults(data))
+        .catch(() => setTickerResults([]));
+    }, 300);
+
+    return () => clearTimeout(handle);
+  }, [ticker, tradeType]);
+
+  const tickerLookup = useMemo(() => {
+    const map = new Map();
+    holdings.forEach((h) => map.set(h.ticker, h.name));
+    if (tradeType !== "sell") {
+      tickerResults.forEach((r) => map.set(r.ticker, r.name));
+    }
+    return map;
+  }, [holdings, tickerResults, tradeType]);
+
+  const isValidTicker = tickerLookup.has(ticker.toUpperCase());
 
   const handleTickerChange = (e) => {
-    setTicker(e.target.value.toUpperCase());
+    setTicker(e.target.value);
   };
 
   const handleAmountChange = (e) => {
@@ -118,6 +139,28 @@ function App() {
       })
       .catch((err) => setTradeError(err.message))
       .finally(() => setSubmitting(false));
+  };
+
+  const openHistory = (tickerSymbol) => {
+    setHistoryTicker(tickerSymbol);
+    setHistoryTransactions([]);
+    setHistoryError(null);
+    setHistoryLoading(true);
+
+    fetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => setHistoryTransactions(data))
+      .catch((err) => setHistoryError(err.message))
+      .finally(() => setHistoryLoading(false));
+  };
+
+  const closeHistory = () => {
+    setHistoryTicker(null);
+    setHistoryTransactions([]);
+    setHistoryError(null);
   };
 
   return (
@@ -177,6 +220,13 @@ function App() {
               )}
             </p>
           </article>
+
+          <article className="summary-card">
+            <p className="summary-label">Realized P&amp;L</p>
+            <p className={`summary-value ${signClass(summary?.total_realized_pnl)}`}>
+              {formatCurrency(summary?.total_realized_pnl)}
+            </p>
+          </article>
         </section>
 
         <section className="holdings-card" id="holdings">
@@ -206,7 +256,11 @@ function App() {
 
                 <tbody>
                   {holdings.map((holding) => (
-                    <tr key={holding.ticker}>
+                    <tr
+                      key={holding.ticker}
+                      className="clickable-row"
+                      onClick={() => openHistory(holding.ticker)}
+                    >
                       <td className="ticker">{holding.ticker}</td>
                       <td>{holding.name}</td>
                       <td>{Number(holding.amount)}</td>
@@ -252,15 +306,17 @@ function App() {
               <input
                 type="text"
                 list="ticker-options"
-                placeholder="Ticker (e.g. AAPL)"
+                placeholder="Ticker or company name"
                 value={ticker}
                 onChange={handleTickerChange}
                 autoComplete="off"
                 required
               />
               <datalist id="ticker-options">
-                {tickerOptions.map((t) => (
-                  <option key={t} value={t} />
+                {Array.from(tickerLookup.entries()).map(([t, name]) => (
+                  <option key={t} value={t}>
+                    {name}
+                  </option>
                 ))}
               </datalist>
 
@@ -284,6 +340,60 @@ function App() {
             {tradeError && <p className="error">{tradeError}</p>}
           </form>
         </section>
+
+        {historyTicker && (
+          <div className="modal-overlay" onClick={closeHistory}>
+            <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <div>
+                  <h3>{historyTicker}</h3>
+                  <p>{tickerLookup.get(historyTicker)}</p>
+                </div>
+                <button type="button" className="modal-close" onClick={closeHistory} aria-label="Close">
+                  &times;
+                </button>
+              </div>
+
+              <div className="modal-body">
+                {historyLoading && <p>Loading...</p>}
+                {historyError && <p className="error">Failed to load history: {historyError}</p>}
+
+                {!historyLoading && !historyError && historyTransactions.length === 0 && (
+                  <p>No transactions found.</p>
+                )}
+
+                {!historyLoading && !historyError && historyTransactions.length > 0 && (
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Shares</th>
+                        <th>Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...historyTransactions]
+                        .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date) || b.tr_id - a.tr_id)
+                        .map((tx) => {
+                        const amountNum = Number(tx.amount);
+                        const isBuy = amountNum > 0;
+                        return (
+                          <tr key={tx.tr_id}>
+                            <td>{formatDate(tx.transaction_date)}</td>
+                            <td className={isBuy ? "positive" : "negative"}>{isBuy ? "Buy" : "Sell"}</td>
+                            <td>{Math.abs(amountNum)}</td>
+                            <td>{formatCurrency(Number(tx.cost_basis))}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
