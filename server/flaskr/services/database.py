@@ -1,5 +1,5 @@
 import mysql.connector
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 
@@ -32,30 +32,37 @@ def read_query(query, params=None):
     conn.close()
     return result
 
-def get_transactions():
-    query = (
-        "SELECT tr_id, ticker, amount, cost_basis, transaction_date "
-        "FROM transactions ORDER BY transaction_date, tr_id;"
-    )
+def get_transactions(ticker=None):
+    query = "SELECT tr_id, ticker, amount, cost_basis, transaction_date FROM transactions"
+    params = None
+    if ticker:
+        query += " WHERE ticker = %s"
+        params = (ticker,)
+    query += " ORDER BY transaction_date, tr_id;"
 
     return [
         {
             'tr_id': tr_id,
-            'ticker': ticker,
+            'ticker': tx_ticker,
             'amount': amount,
             'cost_basis': cost_basis,
             'transaction_date': transaction_date,
         }
-        for tr_id, ticker, amount, cost_basis, transaction_date in read_query(query)
+        for tr_id, tx_ticker, amount, cost_basis, transaction_date in read_query(query, params)
     ]
 
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(amount)
-    if transaction_date is None:
-        transaction_date = datetime.now().date()
 
     if cost_basis is None:
-        cost_basis = YahooFinanceStock(ticker).get_price_on_date(transaction_date)
+        # Price lookup needs the local trading day, not a UTC-shifted one --
+        # near UTC rollover, "now" in UTC can already read as "tomorrow", a
+        # day that hasn't traded yet.
+        price_lookup_date = transaction_date if transaction_date is not None else datetime.now().date()
+        cost_basis = YahooFinanceStock(ticker).get_price_on_date(price_lookup_date)
+
+    if transaction_date is None:
+        transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
     write_query(
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
@@ -73,11 +80,12 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     if amount > current_amount:
         raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
 
-    if transaction_date is None:
-        transaction_date = datetime.now().date()
-
     if cost_basis is None:
-        cost_basis = YahooFinanceStock(ticker).get_price_on_date(transaction_date)
+        price_lookup_date = transaction_date if transaction_date is not None else datetime.now().date()
+        cost_basis = YahooFinanceStock(ticker).get_price_on_date(price_lookup_date)
+
+    if transaction_date is None:
+        transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
     write_query(
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",

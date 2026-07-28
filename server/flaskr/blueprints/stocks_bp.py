@@ -3,9 +3,15 @@ import mysql
 
 from flaskr.services.database import get_transactions, buy_holding, sell_holding
 from flaskr.services import performance
-from flaskr.yahoo_finance import YahooFinanceStock
+from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
 stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
+
+
+@stocks_bp.get("/search")
+def search_stocks_route():
+    query = request.args.get("q", "")
+    return jsonify(search_stocks(query)), 200
 
 
 def _build_holdings():
