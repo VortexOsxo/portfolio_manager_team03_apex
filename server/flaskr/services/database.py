@@ -80,7 +80,7 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
 
 def get_holding_amount(ticker, date=None):
     query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s" +\
-    "AND transaction_date <= %s;" if date else ";"
+    ("AND transaction_date <= %s;" if date else ";")
     params = (ticker, date) if date else (ticker,)
 
     result = read_query(query, params)
@@ -105,14 +105,14 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     )
 
 def get_traded_tickers():
-    query = " SELECT DISTINCT ticker FROM transactions;"
+    query = "SELECT DISTINCT ticker FROM transactions;"
     result = read_query(query)
     return [row[0] for row in result]
 
 def get_portfolio_performance(start_date, end_date):
     tickers = get_traded_tickers()
     if not tickers:
-        return []
+        return [], []
 
     dates = YahooFinanceStock.get_market_trading_days(start_date, end_date)
     ticker_values = {
@@ -131,6 +131,5 @@ def get_portfolio_performance(start_date, end_date):
             if amount == 0: continue
             date_value += ticker_values.get(ticker).get(date) * float(amount)
         performances.append(date_value)
-
 
     return dates, performances
