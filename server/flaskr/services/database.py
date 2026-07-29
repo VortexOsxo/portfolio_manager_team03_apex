@@ -32,12 +32,21 @@ def read_query(query, params=None):
     conn.close()
     return result
 
-def get_transactions(ticker=None):
-    query = "SELECT tr_id, ticker, amount, cost_basis, transaction_date FROM transactions"
-    params = None
+def get_transactions(ticker = None, start_date = None, end_date = None):
+    query = (
+        "SELECT tr_id, ticker, amount, cost_basis, transaction_date "
+        "FROM transactions WHERE 1=1"
+    )
+    params = ()
     if ticker:
-        query += " WHERE ticker = %s"
-        params = (ticker,)
+        query += " AND ticker = %s"
+        params += (ticker,)
+    if start_date is not None:
+        query += " AND transaction_date >= %s"
+        params += (start_date,)
+    if end_date is not None:
+        query += " AND transaction_date <= %s"
+        params += (end_date,)
     query += " ORDER BY transaction_date, tr_id;"
 
     return [
@@ -69,9 +78,12 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         (ticker, amount, cost_basis, transaction_date)
     )
 
-def get_holding_amount(ticker):
-    query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s;"
-    result = read_query(query, (ticker,))
+def get_holding_amount(ticker, date=None):
+    query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s" +\
+    ("AND transaction_date <= %s;" if date else ";")
+    params = (ticker, date) if date else (ticker,)
+
+    result = read_query(query, params)
     return result[0][0]
 
 def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
@@ -91,3 +103,33 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
         (ticker, -amount, cost_basis, transaction_date)
     )
+
+def get_traded_tickers():
+    query = "SELECT DISTINCT ticker FROM transactions;"
+    result = read_query(query)
+    return [row[0] for row in result]
+
+def get_portfolio_performance(start_date, end_date):
+    tickers = get_traded_tickers()
+    if not tickers:
+        return [], []
+
+    dates = YahooFinanceStock.get_market_trading_days(start_date, end_date)
+    ticker_values = {
+        ticker: YahooFinanceStock(ticker).get_daily_values(start_date, end_date)
+        for ticker in tickers
+    }
+
+    performances = []
+    for date in dates:
+        holdings = {
+            ticker: get_holding_amount(ticker, date)
+            for ticker in tickers
+        }
+        date_value = 0
+        for ticker, amount in holdings.items():
+            if amount == 0: continue
+            date_value += ticker_values.get(ticker).get(date) * float(amount)
+        performances.append(date_value)
+
+    return dates, performances

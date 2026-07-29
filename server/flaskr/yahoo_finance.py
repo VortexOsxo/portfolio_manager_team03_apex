@@ -55,7 +55,7 @@ class YahooFinanceStock:
 
     def get_price_on_date(self, date):
         """Closing price on a given date ("YYYY-MM-DD" string or datetime.date)."""
-        start = datetime.strptime(date, "%Y-%m-%d") if isinstance(date, str) else date
+        start = self._get_date(date)
         end = start + timedelta(days=1)
 
         history = self._stock.history(start=start, end=end)
@@ -63,6 +63,35 @@ class YahooFinanceStock:
             return None
 
         return history["Close"].iloc[0]
+
+    def get_daily_values(self, start_date, end_date):
+        start = self._get_date(start_date)
+        end = self._get_date(end_date)
+
+        history = self._stock.history(start=start, end=end + timedelta(days=1), interval="1d")
+        if history.empty:
+            return {}
+
+        dates = [dt.strftime("%Y-%m-%d") for dt in history.index.to_pydatetime()]
+        prices = history["Close"].tolist()
+        return dict(zip(dates, prices))
+
+    @staticmethod
+    def _get_date(date):
+        return datetime.strptime(date, "%Y-%m-%d") if isinstance(date, str) else date
+
+    @staticmethod
+    def get_market_trading_days(start_date, end_date, market_ticker="^GSPC"):
+        """Return trading days for a broad US market index rather than a single stock."""
+        start = YahooFinanceStock._get_date(start_date)
+        end = YahooFinanceStock._get_date(end_date)
+
+        history = yf.Ticker(market_ticker).history(
+            start=start,
+            end=end + timedelta(days=1),
+            interval="1d"
+        )
+        return history.index.strftime("%Y-%m-%d").tolist()
 
 
 def search_stocks(query, limit=8):
