@@ -137,14 +137,14 @@ function TrendArrow({ value }) {
   );
 }
 
-function PerformanceTooltip({ active, payload, label }) {
+function PerformanceTooltip({ active, payload, label, valueLabel = "Portfolio value" }) {
   if (!active || !payload?.length) return null;
 
   return (
     <div className="chart-tooltip">
       <p>{formatChartDate(label, { month: "long", day: "numeric", year: "numeric" })}</p>
       <strong>{formatCurrency(payload[0].value)}</strong>
-      <span>Portfolio value</span>
+      <span>{valueLabel}</span>
     </div>
   );
 }
@@ -167,6 +167,8 @@ function App() {
   const [historyTransactions, setHistoryTransactions] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
+  const [historyPerformance, setHistoryPerformance] = useState([]);
+  const [historyPerformanceLoading, setHistoryPerformanceLoading] = useState(false);
   const [modalClosing, setModalClosing] = useState(false);
 
   const [performanceRange, setPerformanceRange] = useState("3M");
@@ -360,6 +362,8 @@ function App() {
     setHistoryTransactions([]);
     setHistoryError(null);
     setHistoryLoading(true);
+    setHistoryPerformance([]);
+    setHistoryPerformanceLoading(true);
 
     fetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
       .then((res) => {
@@ -369,6 +373,21 @@ function App() {
       .then((data) => setHistoryTransactions(data))
       .catch((err) => setHistoryError(err.message))
       .finally(() => setHistoryLoading(false));
+
+    const { startDate, endDate } = getPerformanceDates("3M");
+    fetch(`/api/stocks/performance/${encodeURIComponent(tickerSymbol)}?start_date=${startDate}&end_date=${endDate}`)
+      .then((res) => (res.ok ? res.json() : { dates: [], performances: [] }))
+      .then((data) => {
+        const dates = Array.isArray(data.dates) ? data.dates : [];
+        const performances = Array.isArray(data.performances) ? data.performances : [];
+        const chartData = dates
+          .slice(0, performances.length)
+          .map((date, index) => ({ date, value: Number(performances[index]) }))
+          .filter((point) => Number.isFinite(point.value));
+        setHistoryPerformance(chartData);
+      })
+      .catch(() => setHistoryPerformance([]))
+      .finally(() => setHistoryPerformanceLoading(false));
   };
 
   const closeHistory = () => {
@@ -377,6 +396,7 @@ function App() {
       setHistoryTicker(null);
       setHistoryTransactions([]);
       setHistoryError(null);
+      setHistoryPerformance([]);
       setModalClosing(false);
     }, 180);
   };
@@ -644,6 +664,57 @@ function App() {
                   </div>
 
                   <div className="modal-body">
+                    {historyPerformanceLoading && (
+                      <div className="history-chart-skeleton" aria-label="Loading price history">
+                        <span className="skeleton-block" style={{ width: "100%", height: "100%" }} />
+                      </div>
+                    )}
+
+                    {!historyPerformanceLoading && historyPerformance.length > 1 && (
+                      <div className="history-chart" aria-label={`${historyTicker} price, last 3 months`}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={historyPerformance} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="historyFill" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={CHART_ACCENT} stopOpacity={0.3} />
+                                <stop offset="100%" stopColor={CHART_ACCENT} stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid stroke="rgba(255, 255, 255, 0.08)" vertical={false} />
+                            <XAxis
+                              dataKey="date"
+                              axisLine={false}
+                              tickLine={false}
+                              minTickGap={40}
+                              tick={{ fill: "rgba(238, 240, 248, 0.5)", fontSize: 11 }}
+                              tickFormatter={(value) => formatChartDate(value)}
+                            />
+                            <YAxis
+                              axisLine={false}
+                              tickLine={false}
+                              width={56}
+                              domain={["auto", "auto"]}
+                              tick={{ fill: "rgba(238, 240, 248, 0.5)", fontSize: 11 }}
+                              tickFormatter={formatCompactCurrency}
+                            />
+                            <Tooltip
+                              content={<PerformanceTooltip valueLabel={`${historyTicker} price`} />}
+                              cursor={{ stroke: "rgba(238, 240, 248, 0.28)", strokeWidth: 1 }}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="value"
+                              stroke={CHART_ACCENT}
+                              strokeWidth={2}
+                              fill="url(#historyFill)"
+                              activeDot={{ r: 4, fill: CHART_ACCENT, stroke: CHART_SURFACE, strokeWidth: 2 }}
+                              animationDuration={500}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
                     {historyLoading && <p>Loading...</p>}
                     {historyError && <p className="error">Failed to load history: {historyError}</p>}
 
