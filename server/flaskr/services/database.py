@@ -61,6 +61,21 @@ def get_transactions(ticker = None, start_date = None, end_date = None):
         for tr_id, tx_ticker, amount, cost_basis, transaction_date in read_query(query, params)
     ]
 
+
+def get_account_balance(account_id=1):
+    result = read_query("SELECT balance FROM accounts WHERE id = %s;", (account_id,))
+    if not result:
+        raise ValueError(f"Account {account_id} not found")
+    return Decimal(str(result[0][0] or 0))
+
+
+def update_account_balance(amount, account_id=1):
+    amount = Decimal(str(amount))
+
+    query = "UPDATE accounts SET balance = balance + %s WHERE id = %s;"
+    write_query(query, (amount, account_id))
+
+
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(Decimal(str(amount)))
 
@@ -82,11 +97,10 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # FOR UPDATE locks the rows this balance is derived from, so a
-        # concurrent buy blocks here instead of reading the same
-        # not-yet-committed balance and also passing the check.
-        cursor.execute("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions FOR UPDATE;")
-        cash_balance = INITIAL_CASH - Decimal(str(cursor.fetchone()[0]))
+        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (1,))
+        row = cursor.fetchone()
+
+        cash_balance = Decimal(str(row[0] or 0))
         if total_cost > cash_balance:
             raise ValueError(
                 f"Insufficient cash: buying {amount} shares of {ticker} at {cost_basis} "
@@ -94,9 +108,10 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
             )
 
         cursor.execute(
-            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
             (ticker, amount, cost_basis, transaction_date)
         )
+        update_account_balance(-total_cost, account_id=1)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -105,9 +120,6 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         cursor.close()
         conn.close()
 
-def get_cash_balance():
-    result = read_query("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions;")
-    return INITIAL_CASH - Decimal(str(result[0][0]))
 
 def get_holding_amount(ticker, date=None):
     query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s" +\
@@ -130,10 +142,22 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    write_query(
-        "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
-        (ticker, -amount, cost_basis, transaction_date)
-    )
+    total_proceeds = amount * Decimal(str(cost_basis))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
+            (ticker, -amount, cost_basis, transaction_date)
+        )
+        update_account_balance(total_proceeds, account_id=1)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
 
 def get_traded_tickers():
     query = "SELECT DISTINCT ticker FROM transactions;"

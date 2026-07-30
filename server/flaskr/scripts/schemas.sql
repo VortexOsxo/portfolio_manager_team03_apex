@@ -3,6 +3,12 @@ CREATE DATABASE portfolio_db;
 
 USE portfolio_db;
 
+CREATE TABLE `accounts` (
+  `id` int AUTO_INCREMENT,
+  `balance` decimal(15,2) NOT NULL,
+  PRIMARY KEY (`id`)
+);
+
 CREATE TABLE `transactions` (
   `tr_id` int AUTO_INCREMENT,
   `ticker` varchar(10) NOT NULL,
@@ -11,3 +17,5 @@ CREATE TABLE `transactions` (
   `transaction_date` datetime NOT NULL,
   PRIMARY KEY (`tr_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+
+INSERT INTO `accounts` (`balance`) VALUES (30000.00);

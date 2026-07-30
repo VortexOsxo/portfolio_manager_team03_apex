@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 import mysql
 
-from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance, get_cash_balance
+from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance, get_account_balance
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
@@ -78,7 +78,7 @@ def get_summary():
     )
     total_realized_pnl = sum(realized.values())
 
-    cash_balance = get_cash_balance()
+    cash_balance = get_account_balance()
     net_worth = total_value + float(cash_balance)
 
     prior_value = total_value - total_day_change
