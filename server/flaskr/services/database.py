@@ -74,20 +74,35 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         raise ValueError(f"No price data available for {ticker} on {price_lookup_date}")
 
     total_cost = amount * Decimal(str(cost_basis))
-    cash_balance = get_cash_balance()
-    if total_cost > cash_balance:
-        raise ValueError(
-            f"Insufficient cash: buying {amount} shares of {ticker} at {cost_basis} "
-            f"costs {total_cost:.2f}, but only {cash_balance:.2f} available"
-        )
 
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    write_query(
-        "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
-        (ticker, amount, cost_basis, transaction_date)
-    )
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # FOR UPDATE locks the rows this balance is derived from, so a
+        # concurrent buy blocks here instead of reading the same
+        # not-yet-committed balance and also passing the check.
+        cursor.execute("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions FOR UPDATE;")
+        cash_balance = INITIAL_CASH - Decimal(str(cursor.fetchone()[0]))
+        if total_cost > cash_balance:
+            raise ValueError(
+                f"Insufficient cash: buying {amount} shares of {ticker} at {cost_basis} "
+                f"costs {total_cost:.2f}, but only {cash_balance:.2f} available"
+            )
+
+        cursor.execute(
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
+            (ticker, amount, cost_basis, transaction_date)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
 
 def get_cash_balance():
     result = read_query("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions;")
