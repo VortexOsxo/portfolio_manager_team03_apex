@@ -5,7 +5,7 @@ from threading import Lock
 
 import mysql.connector
 
-from flaskr.config import DB_CONFIG
+from flaskr.config import DB_CONFIG, INITIAL_CASH
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock
 
@@ -75,7 +75,7 @@ def get_transactions(ticker = None, start_date = None, end_date = None):
     ]
 
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
-    amount = abs(amount)
+    amount = abs(Decimal(str(amount)))
 
     if cost_basis is None:
         # Price lookup needs the local trading day, not a UTC-shifted one --
@@ -84,14 +84,45 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         price_lookup_date = transaction_date if transaction_date is not None else datetime.now().date()
         cost_basis = YahooFinanceStock(ticker).get_price_on_date(price_lookup_date)
 
+    if cost_basis is None:
+        raise ValueError(f"No price data available for {ticker} on {price_lookup_date}")
+
+    total_cost = amount * Decimal(str(cost_basis))
+
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    write_query(
-        "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
-        (ticker, amount, cost_basis, transaction_date)
-    )
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # FOR UPDATE locks the rows this balance is derived from, so a
+        # concurrent buy blocks here instead of reading the same
+        # not-yet-committed balance and also passing the check.
+        cursor.execute("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions FOR UPDATE;")
+        cash_balance = INITIAL_CASH - Decimal(str(cursor.fetchone()[0]))
+        if total_cost > cash_balance:
+            raise ValueError(
+                f"Insufficient cash: buying {amount} shares of {ticker} at {cost_basis} "
+                f"costs {total_cost:.2f}, but only {cash_balance:.2f} available"
+            )
+
+        cursor.execute(
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
+            (ticker, amount, cost_basis, transaction_date)
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
     clear_performance_cache()
+
+def get_cash_balance():
+    result = read_query("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions;")
+    return INITIAL_CASH - Decimal(str(result[0][0]))
 
 def get_holding_amount(ticker, date=None):
     query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s" +\
@@ -161,3 +192,15 @@ def get_portfolio_performance(start_date, end_date):
         }
 
     return dates, performances
+
+def get_stock_performance(ticker, start_date, end_date):
+    market_dates = YahooFinanceStock.get_market_trading_days(start_date, end_date)
+    ticker_values = YahooFinanceStock(ticker).get_daily_values(start_date, end_date)
+
+    stock_dates, performances = [], []
+    for date in market_dates:
+        if date not in ticker_values:
+            continue
+        stock_dates.append(date)
+        performances.append(ticker_values[date])
+    return stock_dates, performances

@@ -60,3 +60,11 @@ Run the script from the project root with:
 ```powershell
 python .\flaskr\scripts\send_request.py
 ```
+
+## 7. Run the tests
+
+From the project root (with the virtual environment activated):
+
+```powershell
+python -m pytest tests/ -v
+```

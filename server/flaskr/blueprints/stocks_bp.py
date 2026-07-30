@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 import mysql
 
-from flaskr.services.database import get_transactions, buy_holding, sell_holding, get_portfolio_performance
+from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance, get_cash_balance
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
@@ -78,6 +78,9 @@ def get_summary():
     )
     total_realized_pnl = sum(realized.values())
 
+    cash_balance = get_cash_balance()
+    net_worth = total_value + float(cash_balance)
+
     prior_value = total_value - total_day_change
     total_unrealized_pnl_pct = round(total_unrealized_pnl / total_cost_basis * 100, 2) if total_cost_basis else None
     total_day_change_pct = round(total_day_change / prior_value * 100, 2) if prior_value else None
@@ -90,6 +93,8 @@ def get_summary():
         'total_day_change': round(total_day_change, 2),
         'total_day_change_pct': total_day_change_pct,
         'total_realized_pnl': round(total_realized_pnl, 2),
+        'cash_balance': round(float(cash_balance), 2),
+        'net_worth': round(net_worth, 2),
     }), 200
 
 
@@ -108,6 +113,27 @@ def get_performance():
 
     return jsonify({"dates": dates, "performances": performances}), 200
 
+@stocks_bp.get("/performance/<string:ticker>")
+def get_stock_performance_route(ticker):
+    print('Received request for stock performance:', ticker)
+    try:
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+
+        if not start_date or not end_date:
+            return jsonify({"error": "start_date and end_date query parameters are required"}), 400
+
+        try:
+            dates, performances = get_stock_performance(ticker, start_date, end_date)
+        except Exception as e:
+            print(e)
+            return jsonify({"error": str(e)}), 500
+
+        return jsonify({"dates": dates, "performances": performances}), 200
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        return "", 400
+
 @stocks_bp.post("/buy")
 def buy_stock():
     data = request.get_json()
@@ -119,10 +145,12 @@ def buy_stock():
 
     cost_basis = data.get("cost_basis")
     transaction_date = data.get("transaction_date")
-    try: 
+    try:
         buy_holding(ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError as e:
         return "", 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     return jsonify({"message": "Stock bought successfully"}), 201
 
