@@ -1,17 +1,18 @@
 import mysql.connector
 from datetime import datetime, timezone
 from decimal import Decimal
+import os
 
-
-from flaskr.config import DB_CONFIG, INITIAL_CASH
 from flaskr.yahoo_finance import YahooFinanceStock
+
+INITIAL_CASH = Decimal(str(os.getenv("INITIAL_CASH", "30000.00")))
 
 def get_db_connection():
     return mysql.connector.connect(
-        host=DB_CONFIG["host"],
-        user=DB_CONFIG["user"],
-        password=DB_CONFIG["password"],
-        database=DB_CONFIG["database"],
+        host=os.getenv("DB_HOST"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        database=os.getenv("DB_NAME"),
     )
 
 

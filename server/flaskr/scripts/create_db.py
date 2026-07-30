@@ -4,18 +4,20 @@ from pathlib import Path
 
 import mysql.connector
 
+from dotenv import load_dotenv
+load_dotenv()
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from flaskr.config import DB_CONFIG
 
 
 def main():
     conn = mysql.connector.connect(
-        host=DB_CONFIG["host"],
-        user=DB_CONFIG["user"],
-        password=DB_CONFIG["password"],
+        host=os.getenv("DB_HOST"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
     )
 
     cursor = conn.cursor()
