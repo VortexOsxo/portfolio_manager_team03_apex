@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import patch
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
 
 from flaskr.services import database
 
@@ -39,8 +40,12 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
             "2026-01-05",
         )
 
-    @patch("flaskr.services.database.write_query")
-    def test_buy_invalidates_cached_ranges(self, write_query):
+    @patch("flaskr.services.database.get_db_connection")
+    def test_buy_invalidates_cached_ranges(self, get_db_connection):
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = (0,)
+        get_db_connection.return_value.cursor.return_value = mock_cursor
+
         database._PERFORMANCE_CACHE[("start", "end")] = {
             "created_at": 0,
             "dates": [],
@@ -50,7 +55,10 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         database.buy_holding("AAPL", 1, cost_basis=100, transaction_date="2026-01-02")
 
         self.assertEqual(database._PERFORMANCE_CACHE, {})
-        write_query.assert_called_once()
+        mock_cursor.execute.assert_any_call(
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
+            ("AAPL", Decimal("1"), 100, "2026-01-02"),
+        )
 
 
 if __name__ == "__main__":
