@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 import mysql
 
-from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance
+from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance, get_cash_balance
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
@@ -78,6 +78,9 @@ def get_summary():
     )
     total_realized_pnl = sum(realized.values())
 
+    cash_balance = get_cash_balance()
+    net_worth = total_value + float(cash_balance)
+
     prior_value = total_value - total_day_change
     total_unrealized_pnl_pct = round(total_unrealized_pnl / total_cost_basis * 100, 2) if total_cost_basis else None
     total_day_change_pct = round(total_day_change / prior_value * 100, 2) if prior_value else None
@@ -90,6 +93,8 @@ def get_summary():
         'total_day_change': round(total_day_change, 2),
         'total_day_change_pct': total_day_change_pct,
         'total_realized_pnl': round(total_realized_pnl, 2),
+        'cash_balance': round(float(cash_balance), 2),
+        'net_worth': round(net_worth, 2),
     }), 200
 
 
@@ -140,10 +145,12 @@ def buy_stock():
 
     cost_basis = data.get("cost_basis")
     transaction_date = data.get("transaction_date")
-    try: 
+    try:
         buy_holding(ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError as e:
         return "", 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     return jsonify({"message": "Stock bought successfully"}), 201
 

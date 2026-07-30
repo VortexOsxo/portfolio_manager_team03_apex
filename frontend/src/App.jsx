@@ -99,6 +99,7 @@ function App() {
   const animatedUnrealizedPnl = useCountUp(summary?.total_unrealized_pnl ?? null);
   const animatedDayChange = useCountUp(summary?.total_day_change ?? null);
   const animatedRealizedPnl = useCountUp(summary?.total_realized_pnl ?? null);
+  const animatedCashBalance = useCountUp(summary?.cash_balance ?? null);
 
   const fetchHoldings = () => {
     setLoading(true);
@@ -297,6 +298,15 @@ function App() {
                 <TrendArrow value={summary?.total_realized_pnl} />
                 {formatCurrency(animatedRealizedPnl)}
               </p>
+            )}
+          </article>
+
+          <article className="summary-card">
+            <p className="summary-label">Cash available</p>
+            {loading && !summary ? (
+              <p className="summary-value"><span className="skeleton-block" style={{ width: "90px", height: "22px" }} /></p>
+            ) : (
+              <p className="summary-value">{formatCurrency(animatedCashBalance)}</p>
             )}
           </article>
         </section>
