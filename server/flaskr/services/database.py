@@ -74,7 +74,11 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     if cost_basis is None:
         raise ValueError(f"No price data available for {ticker} on {price_lookup_date}")
 
-    total_cost = amount * Decimal(str(cost_basis))
+    cost_basis = Decimal(str(cost_basis))
+    if cost_basis <= 0:
+        raise ValueError(f"cost_basis must be positive, got {cost_basis}")
+
+    total_cost = amount * cost_basis
 
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -126,6 +130,13 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     if cost_basis is None:
         price_lookup_date = transaction_date if transaction_date is not None else datetime.now().date()
         cost_basis = YahooFinanceStock(ticker).get_price_on_date(price_lookup_date)
+
+    if cost_basis is None:
+        raise ValueError(f"No price data available for {ticker} on {price_lookup_date}")
+
+    cost_basis = Decimal(str(cost_basis))
+    if cost_basis <= 0:
+        raise ValueError(f"cost_basis must be positive, got {cost_basis}")
 
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
