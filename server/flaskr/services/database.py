@@ -163,3 +163,15 @@ def get_portfolio_performance(start_date, end_date):
         performances.append(date_value)
 
     return dates, performances
+
+def get_stock_performance(ticker, start_date, end_date):
+    market_dates = YahooFinanceStock.get_market_trading_days(start_date, end_date)
+    ticker_values = YahooFinanceStock(ticker).get_daily_values(start_date, end_date)
+
+    stock_dates, performances = [], []
+    for date in market_dates:
+        if date not in ticker_values:
+            continue
+        stock_dates.append(date)
+        performances.append(ticker_values[date])
+    return stock_dates, performances
