@@ -77,6 +77,54 @@ class YahooFinanceStock:
         return dict(zip(dates, prices))
 
     @staticmethod
+    def get_daily_values_for_tickers(tickers, start_date, end_date):
+        """Fetch daily closing prices for several tickers in one Yahoo request."""
+        tickers = list(dict.fromkeys(tickers))
+        if not tickers:
+            return {}
+
+        start = YahooFinanceStock._get_date(start_date)
+        end = YahooFinanceStock._get_date(end_date)
+        history = yf.download(
+            tickers=tickers,
+            start=start,
+            end=end + timedelta(days=1),
+            interval="1d",
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False,
+            threads=True,
+        )
+        if history.empty:
+            return {ticker: {} for ticker in tickers}
+
+        result = {}
+        column_levels = getattr(history.columns, "nlevels", 1)
+        first_level = set(history.columns.get_level_values(0)) if column_levels > 1 else set()
+
+        for ticker in tickers:
+            try:
+                if ticker in first_level:
+                    close_prices = history[ticker]["Close"]
+                elif "Close" in first_level:
+                    close_prices = history["Close"][ticker]
+                else:
+                    close_prices = history["Close"]
+                    if hasattr(close_prices, "columns"):
+                        close_prices = close_prices[ticker]
+            except (KeyError, TypeError):
+                result[ticker] = {}
+                continue
+
+            close_prices = close_prices.dropna()
+            result[ticker] = {
+                date.strftime("%Y-%m-%d"): float(price)
+                for date, price in close_prices.items()
+            }
+
+        return result
+
+    @staticmethod
     def _get_date(date):
         return datetime.strptime(date, "%Y-%m-%d") if isinstance(date, str) else date
 
