@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -5,9 +6,10 @@ from threading import Lock
 
 import mysql.connector
 
-from flaskr.config import DB_CONFIG, INITIAL_CASH
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock
+
+INITIAL_CASH = Decimal(str(os.getenv("INITIAL_CASH", "30000.00")))
 
 _PERFORMANCE_CACHE = {}
 _PERFORMANCE_CACHE_LOCK = Lock()
@@ -19,13 +21,12 @@ def clear_performance_cache():
     with _PERFORMANCE_CACHE_LOCK:
         _PERFORMANCE_CACHE.clear()
 
-
 def get_db_connection():
     return mysql.connector.connect(
-        host=DB_CONFIG["host"],
-        user=DB_CONFIG["user"],
-        password=DB_CONFIG["password"],
-        database=DB_CONFIG["database"],
+        host=os.getenv("DB_HOST"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASSWORD"),
+        database=os.getenv("DB_NAME"),
     )
 
 
