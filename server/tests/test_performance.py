@@ -1,4 +1,7 @@
+from datetime import datetime
+
 from flaskr.services import performance
+from flaskr.services.performance import compute_portfolio_values, get_tickers_for_range
 
 
 def tx(ticker, amount, cost_basis, transaction_date, tr_id):
@@ -130,3 +133,121 @@ class TestDayChange:
         result = performance.day_change(0, 2.5, 1.2)
 
         assert result == {"value": None, "pct": 1.2}
+
+
+class TestComputePortfolioValues:
+    def test_applies_transactions_once_in_chronological_order(self):
+        dates = ["2026-01-02", "2026-01-05", "2026-01-06"]
+        transactions = [
+            {
+                "tr_id": 2,
+                "ticker": "AAPL",
+                "amount": -2,
+                "transaction_date": datetime(2026, 1, 6, 11, 0),
+            },
+            {
+                "tr_id": 1,
+                "ticker": "AAPL",
+                "amount": 5,
+                "transaction_date": datetime(2026, 1, 2, 9, 30),
+            },
+        ]
+        ticker_values = {
+            "AAPL": {
+                "2026-01-02": 100,
+                "2026-01-05": 110,
+                "2026-01-06": 120,
+            },
+        }
+
+        values = compute_portfolio_values(dates, transactions, ticker_values)
+
+        assert values == [500.0, 550.0, 360.0]
+
+    def test_combines_multiple_tickers_and_forward_fills_missing_prices(self):
+        dates = ["2026-02-02", "2026-02-03"]
+        transactions = [
+            {
+                "tr_id": 1,
+                "ticker": "AAPL",
+                "amount": 2,
+                "transaction_date": "2026-02-02",
+            },
+            {
+                "tr_id": 2,
+                "ticker": "MSFT",
+                "amount": 3,
+                "transaction_date": "2026-02-02",
+            },
+        ]
+        ticker_values = {
+            "AAPL": {"2026-02-02": 10, "2026-02-03": 12},
+            "MSFT": {"2026-02-02": 20},
+        }
+
+        values = compute_portfolio_values(dates, transactions, ticker_values)
+
+        # MSFT has no price for 02-03 (a data gap, not a market holiday), so it
+        # holds its last known price (20) instead of dropping to $0 for the day.
+        assert values == [80.0, 84.0]
+
+    def test_forward_fill_carries_across_multiple_missing_days(self):
+        dates = ["2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04"]
+        transactions = [
+            {"tr_id": 1, "ticker": "GME", "amount": 4, "transaction_date": "2026-04-01"},
+        ]
+        ticker_values = {
+            # gap on both 04-02 and 04-03; price resumes on 04-04
+            "GME": {"2026-04-01": 25, "2026-04-04": 30},
+        }
+
+        values = compute_portfolio_values(dates, transactions, ticker_values)
+
+        assert values == [100.0, 100.0, 100.0, 120.0]
+
+    def test_no_forward_fill_before_a_tickers_first_known_price(self):
+        dates = ["2026-05-01", "2026-05-02"]
+        transactions = [
+            {"tr_id": 1, "ticker": "NEWCO", "amount": 1, "transaction_date": "2026-05-01"},
+        ]
+        ticker_values = {
+            # no price at all on the first date - nothing to forward-fill from yet
+            "NEWCO": {"2026-05-02": 50},
+        }
+
+        values = compute_portfolio_values(dates, transactions, ticker_values)
+
+        assert values == [0.0, 50.0]
+
+    def test_returns_zeroes_before_the_first_transaction(self):
+        dates = ["2026-03-02", "2026-03-03"]
+        transactions = [
+            {
+                "tr_id": 1,
+                "ticker": "NVDA",
+                "amount": 1,
+                "transaction_date": "2026-03-03",
+            },
+        ]
+        ticker_values = {
+            "NVDA": {"2026-03-02": 180, "2026-03-03": 185},
+        }
+
+        values = compute_portfolio_values(dates, transactions, ticker_values)
+
+        assert values == [0.0, 185.0]
+
+
+class TestGetTickersForRange:
+    def test_excludes_positions_closed_before_the_range_and_future_trades(self):
+        transactions = [
+            {"tr_id": 1, "ticker": "OLD", "amount": 2, "transaction_date": "2025-01-01"},
+            {"tr_id": 2, "ticker": "OLD", "amount": -2, "transaction_date": "2025-02-01"},
+            {"tr_id": 3, "ticker": "HELD", "amount": 1, "transaction_date": "2025-03-01"},
+            {"tr_id": 4, "ticker": "TRADED", "amount": 1, "transaction_date": "2026-01-15"},
+            {"tr_id": 5, "ticker": "FUTURE", "amount": 1, "transaction_date": "2027-01-01"},
+        ]
+
+        tickers = get_tickers_for_range("2026-01-01", "2026-01-31", transactions)
+
+        assert tickers == ["HELD", "TRADED"]

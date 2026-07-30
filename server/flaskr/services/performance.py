@@ -72,3 +72,81 @@ def day_change(amount_held, day_change_per_share, day_change_pct):
         "value": round(float(amount_held) * day_change_per_share, 2),
         "pct": day_change_pct,
     }
+
+
+def _date_key(value):
+    """Normalize database datetimes and API date strings for comparison."""
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    return str(value)[:10]
+
+
+def get_tickers_for_range(start_date, end_date, transactions):
+    """Return tickers that can have a non-zero position during a date range."""
+    holdings_at_start = {}
+    tickers = set()
+
+    for transaction in sorted(
+        transactions,
+        key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
+    ):
+        transaction_date = _date_key(transaction["transaction_date"])
+        ticker = transaction["ticker"]
+        amount = float(transaction["amount"])
+
+        if transaction_date < start_date:
+            holdings_at_start[ticker] = holdings_at_start.get(ticker, 0.0) + amount
+        elif transaction_date <= end_date:
+            tickers.add(ticker)
+
+    tickers.update(
+        ticker
+        for ticker, amount in holdings_at_start.items()
+        if amount
+    )
+    return sorted(tickers)
+
+
+def compute_portfolio_values(dates, transactions, ticker_values):
+    """Calculate daily portfolio values with one chronological transaction pass.
+
+    `ticker_values` maps each ticker to a {date: closing_price} dictionary.
+    Transactions are applied on their calendar date before that day's closing
+    value is calculated. A ticker missing a price on a given date (a data gap,
+    not necessarily a market holiday) holds its last known price rather than
+    dropping to $0 for that day.
+    """
+    ordered_transactions = sorted(
+        transactions,
+        key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
+    )
+    holdings = {}
+    last_known_price = {}
+    transaction_index = 0
+    values = []
+
+    for date in dates:
+        while transaction_index < len(ordered_transactions):
+            transaction = ordered_transactions[transaction_index]
+            if _date_key(transaction["transaction_date"]) > date:
+                break
+
+            ticker = transaction["ticker"]
+            holdings[ticker] = holdings.get(ticker, 0.0) + float(transaction["amount"])
+            transaction_index += 1
+
+        total_value = 0.0
+        for ticker, amount in holdings.items():
+            if not amount:
+                continue
+            price = ticker_values.get(ticker, {}).get(date)
+            if price is not None:
+                last_known_price[ticker] = price
+            else:
+                price = last_known_price.get(ticker)
+            if price is not None:
+                total_value += float(price) * amount
+
+        values.append(round(total_value, 2))
+
+    return values

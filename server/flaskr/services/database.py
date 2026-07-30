@@ -1,11 +1,25 @@
-import mysql.connector
+import os
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
-import os
+from threading import Lock
 
+import mysql.connector
+
+from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock
 
 INITIAL_CASH = Decimal(str(os.getenv("INITIAL_CASH", "30000.00")))
+
+_PERFORMANCE_CACHE = {}
+_PERFORMANCE_CACHE_LOCK = Lock()
+_PERFORMANCE_CACHE_TTL_SECONDS = 300
+_MARKET_TICKER = "^GSPC"
+
+
+def clear_performance_cache():
+    with _PERFORMANCE_CACHE_LOCK:
+        _PERFORMANCE_CACHE.clear()
 
 def get_db_connection():
     return mysql.connector.connect(
@@ -105,6 +119,8 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         cursor.close()
         conn.close()
 
+    clear_performance_cache()
+
 def get_cash_balance():
     result = read_query("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions;")
     return INITIAL_CASH - Decimal(str(result[0][0]))
@@ -134,6 +150,7 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
         "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
         (ticker, -amount, cost_basis, transaction_date)
     )
+    clear_performance_cache()
 
 def get_traded_tickers():
     query = "SELECT DISTINCT ticker FROM transactions;"
@@ -141,27 +158,39 @@ def get_traded_tickers():
     return [row[0] for row in result]
 
 def get_portfolio_performance(start_date, end_date):
-    tickers = get_traded_tickers()
+    cache_key = (str(start_date), str(end_date))
+    now = time.monotonic()
+    with _PERFORMANCE_CACHE_LOCK:
+        cached = _PERFORMANCE_CACHE.get(cache_key)
+        if cached is not None and now - cached["created_at"] < _PERFORMANCE_CACHE_TTL_SECONDS:
+            return list(cached["dates"]), list(cached["performances"])
+
+    transactions = get_transactions()
+    tickers = performance.get_tickers_for_range(start_date, end_date, transactions)
     if not tickers:
         return [], []
 
-    dates = YahooFinanceStock.get_market_trading_days(start_date, end_date)
+    all_values = YahooFinanceStock.get_daily_values_for_tickers(
+        [*tickers, _MARKET_TICKER],
+        start_date,
+        end_date,
+    )
+    dates = list(all_values.get(_MARKET_TICKER, {}).keys())
+    if not dates:
+        return [], []
+
     ticker_values = {
-        ticker: YahooFinanceStock(ticker).get_daily_values(start_date, end_date)
+        ticker: all_values.get(ticker, {})
         for ticker in tickers
     }
+    performances = performance.compute_portfolio_values(dates, transactions, ticker_values)
 
-    performances = []
-    for date in dates:
-        holdings = {
-            ticker: get_holding_amount(ticker, date)
-            for ticker in tickers
+    with _PERFORMANCE_CACHE_LOCK:
+        _PERFORMANCE_CACHE[cache_key] = {
+            "created_at": time.monotonic(),
+            "dates": list(dates),
+            "performances": list(performances),
         }
-        date_value = 0
-        for ticker, amount in holdings.items():
-            if amount == 0: continue
-            date_value += ticker_values.get(ticker).get(date) * float(amount)
-        performances.append(date_value)
 
     return dates, performances
 
