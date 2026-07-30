@@ -16,6 +16,10 @@ const PERFORMANCE_RANGES = [
   { label: "1Y", months: 12 },
 ];
 
+// Matches the backend's _PERFORMANCE_CACHE_TTL_SECONDS, so client and server
+// go stale together instead of the client trusting a long-dead server cache.
+const PERFORMANCE_CACHE_TTL_MS = 5 * 60 * 1000;
+
 // Matches --accent-solid / the modal-panel surface in styles.css -- kept as
 // literals since Recharts props need plain color strings, not CSS vars.
 const CHART_ACCENT = "#6d6cff";
@@ -172,6 +176,10 @@ function App() {
   const [performanceRequestKey, setPerformanceRequestKey] = useState(0);
   const performanceCacheRef = useRef(new Map());
 
+  // Computed once per range change, so the fetch and the displayed header
+  // date range can't disagree if "now" ticks over a day between renders.
+  const performanceDateRange = useMemo(() => getPerformanceDates(performanceRange), [performanceRange]);
+
   const animatedTotalValue = useCountUp(summary?.total_value ?? null);
   const animatedUnrealizedPnl = useCountUp(summary?.total_unrealized_pnl ?? null);
   const animatedDayChange = useCountUp(summary?.total_day_change ?? null);
@@ -206,12 +214,13 @@ function App() {
   useEffect(() => {
     if (activeView !== "performance") return undefined;
 
-    const { startDate, endDate } = getPerformanceDates(performanceRange);
+    const { startDate, endDate } = performanceDateRange;
     const cacheKey = `${startDate}:${endDate}`;
-    const cachedData = performanceCacheRef.current.get(cacheKey);
+    const cached = performanceCacheRef.current.get(cacheKey);
+    const isFresh = cached && Date.now() - cached.cachedAt < PERFORMANCE_CACHE_TTL_MS;
 
-    if (cachedData) {
-      setPerformanceData(cachedData);
+    if (isFresh) {
+      setPerformanceData(cached.data);
       setPerformanceLoading(false);
       setPerformanceError(null);
       return undefined;
@@ -239,7 +248,7 @@ function App() {
             value: Number(performances[index]),
           }))
           .filter((point) => Number.isFinite(point.value));
-        performanceCacheRef.current.set(cacheKey, chartData);
+        performanceCacheRef.current.set(cacheKey, { data: chartData, cachedAt: Date.now() });
         setPerformanceData(chartData);
       })
       .catch((err) => {
@@ -250,7 +259,7 @@ function App() {
       });
 
     return () => controller.abort();
-  }, [activeView, performanceRange, performanceRequestKey]);
+  }, [activeView, performanceDateRange, performanceRequestKey]);
 
   useEffect(() => {
     // selling only happens to what we already own, so no need to search for tickers when selling
@@ -750,13 +759,13 @@ function App() {
                 <div>
                   <h2>Portfolio value</h2>
                   <p>
-                    {formatChartDate(getPerformanceDates(performanceRange).startDate, {
+                    {formatChartDate(performanceDateRange.startDate, {
                       month: "short",
                       day: "numeric",
                       year: "numeric",
                     })}{" "}
                     —{" "}
-                    {formatChartDate(getPerformanceDates(performanceRange).endDate, {
+                    {formatChartDate(performanceDateRange.endDate, {
                       month: "short",
                       day: "numeric",
                       year: "numeric",

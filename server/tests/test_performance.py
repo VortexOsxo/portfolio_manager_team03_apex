@@ -164,7 +164,7 @@ class TestComputePortfolioValues:
 
         assert values == [500.0, 550.0, 360.0]
 
-    def test_combines_multiple_tickers_and_skips_missing_prices(self):
+    def test_combines_multiple_tickers_and_forward_fills_missing_prices(self):
         dates = ["2026-02-02", "2026-02-03"]
         transactions = [
             {
@@ -187,7 +187,37 @@ class TestComputePortfolioValues:
 
         values = compute_portfolio_values(dates, transactions, ticker_values)
 
-        assert values == [80.0, 24.0]
+        # MSFT has no price for 02-03 (a data gap, not a market holiday), so it
+        # holds its last known price (20) instead of dropping to $0 for the day.
+        assert values == [80.0, 84.0]
+
+    def test_forward_fill_carries_across_multiple_missing_days(self):
+        dates = ["2026-04-01", "2026-04-02", "2026-04-03", "2026-04-04"]
+        transactions = [
+            {"tr_id": 1, "ticker": "GME", "amount": 4, "transaction_date": "2026-04-01"},
+        ]
+        ticker_values = {
+            # gap on both 04-02 and 04-03; price resumes on 04-04
+            "GME": {"2026-04-01": 25, "2026-04-04": 30},
+        }
+
+        values = compute_portfolio_values(dates, transactions, ticker_values)
+
+        assert values == [100.0, 100.0, 100.0, 120.0]
+
+    def test_no_forward_fill_before_a_tickers_first_known_price(self):
+        dates = ["2026-05-01", "2026-05-02"]
+        transactions = [
+            {"tr_id": 1, "ticker": "NEWCO", "amount": 1, "transaction_date": "2026-05-01"},
+        ]
+        ticker_values = {
+            # no price at all on the first date - nothing to forward-fill from yet
+            "NEWCO": {"2026-05-02": 50},
+        }
+
+        values = compute_portfolio_values(dates, transactions, ticker_values)
+
+        assert values == [0.0, 50.0]
 
     def test_returns_zeroes_before_the_first_transaction(self):
         dates = ["2026-03-02", "2026-03-03"]

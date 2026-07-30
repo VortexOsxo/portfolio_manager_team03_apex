@@ -112,13 +112,16 @@ def compute_portfolio_values(dates, transactions, ticker_values):
 
     `ticker_values` maps each ticker to a {date: closing_price} dictionary.
     Transactions are applied on their calendar date before that day's closing
-    value is calculated.
+    value is calculated. A ticker missing a price on a given date (a data gap,
+    not necessarily a market holiday) holds its last known price rather than
+    dropping to $0 for that day.
     """
     ordered_transactions = sorted(
         transactions,
         key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
     )
     holdings = {}
+    last_known_price = {}
     transaction_index = 0
     values = []
 
@@ -137,6 +140,10 @@ def compute_portfolio_values(dates, transactions, ticker_values):
             if not amount:
                 continue
             price = ticker_values.get(ticker, {}).get(date)
+            if price is not None:
+                last_known_price[ticker] = price
+            else:
+                price = last_known_price.get(ticker)
             if price is not None:
                 total_value += float(price) * amount
 

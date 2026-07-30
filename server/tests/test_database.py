@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -96,8 +97,11 @@ class TestBuyHolding:
         stored_date = params[3]
         assert before <= stored_date <= after
 
+    @patch("flaskr.services.database.INITIAL_CASH", Decimal("30000.00"))
     @patch("flaskr.services.database.get_db_connection")
     def test_raises_when_cash_balance_is_insufficient(self, mock_get_conn):
+        # INITIAL_CASH is pinned above rather than relying on the ambient
+        # environment's value, so this test can't flake based on .env contents.
         conn, cursor = mock_connection(cash_spent_so_far=29900)
 
         mock_get_conn.return_value = conn
