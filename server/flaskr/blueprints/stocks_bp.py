@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 import mysql
 
-from flaskr.services.database import get_transactions, buy_holding, sell_holding, get_portfolio_performance
+from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
@@ -107,6 +107,27 @@ def get_performance():
         return jsonify({"error": str(e)}), 500
 
     return jsonify({"dates": dates, "performances": performances}), 200
+
+@stocks_bp.get("/performance/<string:ticker>")
+def get_stock_performance_route(ticker):
+    print('Received request for stock performance:', ticker)
+    try:
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+
+        if not start_date or not end_date:
+            return jsonify({"error": "start_date and end_date query parameters are required"}), 400
+
+        try:
+            dates, performances = get_stock_performance(ticker, start_date, end_date)
+        except Exception as e:
+            print(e)
+            return jsonify({"error": str(e)}), 500
+
+        return jsonify({"dates": dates, "performances": performances}), 200
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        return "", 400
 
 @stocks_bp.post("/buy")
 def buy_stock():
