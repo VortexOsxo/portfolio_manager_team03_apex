@@ -81,11 +81,22 @@ def get_account_balance(account_id=1):
     return Decimal(str(result[0][0] or 0))
 
 
-def update_account_balance(amount, account_id=1):
-    amount = Decimal(str(amount))
+def update_account_balance(amount, account_id=1, cursor=None):
+    """Debit/credit the account balance.
 
+    Pass an existing `cursor` to run this as part of a caller's transaction
+    (e.g. one already holding a `SELECT ... FOR UPDATE` lock on the row) so
+    the update is covered by that lock instead of committing independently
+    on its own connection.
+    """
+    amount = Decimal(str(amount))
     query = "UPDATE accounts SET balance = balance + %s WHERE id = %s;"
-    write_query(query, (amount, account_id))
+    params = (amount, account_id)
+
+    if cursor is not None:
+        cursor.execute(query, params)
+    else:
+        write_query(query, params)
 
 
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
@@ -123,7 +134,7 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
             "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
             (ticker, amount, cost_basis, transaction_date)
         )
-        update_account_balance(-total_cost, account_id=1)
+        update_account_balance(-total_cost, account_id=1, cursor=cursor)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -163,7 +174,7 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
             "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
             (ticker, -amount, cost_basis, transaction_date)
         )
-        update_account_balance(total_proceeds, account_id=1)
+        update_account_balance(total_proceeds, account_id=1, cursor=cursor)
         conn.commit()
     except Exception:
         conn.rollback()
