@@ -242,12 +242,12 @@ function App() {
       })
       .then((data) => {
         const dates = Array.isArray(data.dates) ? data.dates : [];
-        const performances = Array.isArray(data.performances) ? data.performances : [];
+        const equity = Array.isArray(data.equity) ? data.equity : [];
         const chartData = dates
-          .slice(0, performances.length)
+          .slice(0, equity.length)
           .map((date, index) => ({
             date,
-            value: Number(performances[index]),
+            value: Number(equity[index]),
           }))
           .filter((point) => Number.isFinite(point.value));
         performanceCacheRef.current.set(cacheKey, { data: chartData, cachedAt: Date.now() });
@@ -376,13 +376,13 @@ function App() {
 
     const { startDate, endDate } = getPerformanceDates("3M");
     fetch(`/api/stocks/performance/${encodeURIComponent(tickerSymbol)}?start_date=${startDate}&end_date=${endDate}`)
-      .then((res) => (res.ok ? res.json() : { dates: [], performances: [] }))
+      .then((res) => (res.ok ? res.json() : { dates: [], equity: [] }))
       .then((data) => {
         const dates = Array.isArray(data.dates) ? data.dates : [];
-        const performances = Array.isArray(data.performances) ? data.performances : [];
+        const equity = Array.isArray(data.equity) ? data.equity : [];
         const chartData = dates
-          .slice(0, performances.length)
-          .map((date, index) => ({ date, value: Number(performances[index]) }))
+          .slice(0, equity.length)
+          .map((date, index) => ({ date, value: Number(equity[index]) }))
           .filter((point) => Number.isFinite(point.value));
         setHistoryPerformance(chartData);
       })

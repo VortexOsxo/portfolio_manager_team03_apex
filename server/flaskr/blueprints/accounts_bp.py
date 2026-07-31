@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from flask import Blueprint, jsonify, request
 
-from flaskr.services.database import get_account_balance, update_account_balance
+from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
 
@@ -35,7 +35,7 @@ def deposit():
     if error:
         return jsonify({"error": error}), 400
 
-    update_account_balance(amount, account_id=1)
+    deposit_cash(amount)
     balance = get_account_balance(1)
     return jsonify({"account_id": 1, "balance": float(balance)}), 201
 
@@ -47,10 +47,10 @@ def withdraw():
     if error:
         return jsonify({"error": error}), 400
 
-    balance = get_account_balance(1)
-    if amount > balance:
-        return jsonify({"error": "Insufficient funds"}), 400
+    try:
+        withdraw_cash(amount)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
-    update_account_balance(-amount, account_id=1)
     balance = get_account_balance(1)
     return jsonify({"account_id": 1, "balance": float(balance)}), 201

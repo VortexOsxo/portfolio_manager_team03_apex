@@ -251,3 +251,96 @@ class TestGetTickersForRange:
         tickers = get_tickers_for_range("2026-01-01", "2026-01-31", transactions)
 
         assert tickers == ["HELD", "TRADED"]
+
+
+class TestComputeCashBalances:
+    def _cash_tx(self, tx_type, amount, transaction_date, tr_id, cost_basis=None, ticker=None):
+        return {
+            "tr_id": tr_id,
+            "type": tx_type,
+            "ticker": ticker,
+            "amount": amount,
+            "cost_basis": cost_basis,
+            "transaction_date": transaction_date,
+        }
+
+    def test_empty_transactions_and_dates_returns_empty(self):
+        assert performance.compute_cash_balances([], []) == []
+
+    def test_deposit_increases_cash(self):
+        transactions = [self._cash_tx("deposit", 10000, "2024-01-01", 1)]
+        dates = ["2024-01-01", "2024-01-02"]
+
+        balances = performance.compute_cash_balances(dates, transactions)
+
+        assert balances == [10000.0, 10000.0]
+
+    def test_withdrawal_decreases_cash(self):
+        transactions = [
+            self._cash_tx("deposit", 10000, "2024-01-01", 1),
+            self._cash_tx("withdrawal", 3000, "2024-01-02", 2),
+        ]
+        dates = ["2024-01-01", "2024-01-02"]
+
+        balances = performance.compute_cash_balances(dates, transactions)
+
+        assert balances == [10000.0, 7000.0]
+
+    def test_buy_decreases_cash_by_cost(self):
+        transactions = [
+            self._cash_tx("deposit", 10000, "2024-01-01", 1),
+            self._cash_tx("buy", 5, "2024-01-02", 2, cost_basis=200.0, ticker="AAPL"),
+        ]
+        dates = ["2024-01-01", "2024-01-02"]
+
+        balances = performance.compute_cash_balances(dates, transactions)
+
+        assert balances == [10000.0, 9000.0]
+
+    def test_sell_increases_cash_by_proceeds(self):
+        # Sell stores amount as a negative share count.
+        transactions = [
+            self._cash_tx("deposit", 10000, "2024-01-01", 1),
+            self._cash_tx("buy", 5, "2024-01-02", 2, cost_basis=200.0, ticker="AAPL"),
+            self._cash_tx("sell", -5, "2024-01-03", 3, cost_basis=250.0, ticker="AAPL"),
+        ]
+        dates = ["2024-01-01", "2024-01-02", "2024-01-03"]
+
+        balances = performance.compute_cash_balances(dates, transactions)
+
+        # deposit 10000, buy 5×200=1000 out, sell 5×250=1250 in → 10250
+        assert balances == [10000.0, 9000.0, 10250.0]
+
+    def test_multiple_transactions_on_same_date_all_applied(self):
+        transactions = [
+            self._cash_tx("deposit", 5000, "2024-01-01", 1),
+            self._cash_tx("deposit", 5000, "2024-01-01", 2),
+        ]
+        dates = ["2024-01-01"]
+
+        balances = performance.compute_cash_balances(dates, transactions)
+
+        assert balances == [10000.0]
+
+    def test_transaction_after_date_range_is_excluded(self):
+        transactions = [
+            self._cash_tx("deposit", 10000, "2024-01-01", 1),
+            self._cash_tx("withdrawal", 2000, "2024-06-01", 2),
+        ]
+        dates = ["2024-01-01", "2024-01-02"]
+
+        balances = performance.compute_cash_balances(dates, transactions)
+
+        # Withdrawal is in the future relative to these dates
+        assert balances == [10000.0, 10000.0]
+
+    def test_out_of_order_transactions_are_sorted_by_date(self):
+        transactions = [
+            self._cash_tx("withdrawal", 2000, "2024-01-02", 2),
+            self._cash_tx("deposit", 10000, "2024-01-01", 1),
+        ]
+        dates = ["2024-01-01", "2024-01-02"]
+
+        balances = performance.compute_cash_balances(dates, transactions)
+
+        assert balances == [10000.0, 8000.0]

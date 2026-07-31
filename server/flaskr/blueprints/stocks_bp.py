@@ -3,7 +3,10 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, jsonify, request
 import mysql
 
-from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance, get_account_balance
+from flaskr.services.database import (
+    get_stock_performance, get_transactions, buy_holding, sell_holding,
+    get_portfolio_performance, get_account_balance, deposit_cash, withdraw_cash,
+)
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
@@ -114,11 +117,11 @@ def get_performance():
         return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
     try:
-        dates, performances = get_portfolio_performance(start_date, end_date)
+        dates, equity, cash = get_portfolio_performance(start_date, end_date)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    return jsonify({"dates": dates, "performances": performances}), 200
+    return jsonify({"dates": dates, "equity": equity, "cash": cash}), 200
 
 @stocks_bp.get("/performance/<string:ticker>")
 def get_stock_performance_route(ticker):
@@ -131,12 +134,12 @@ def get_stock_performance_route(ticker):
             return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
         try:
-            dates, performances = get_stock_performance(ticker, start_date, end_date)
+            dates, equity = get_stock_performance(ticker, start_date, end_date)
         except Exception as e:
             print(e)
             return jsonify({"error": str(e)}), 500
 
-        return jsonify({"dates": dates, "performances": performances}), 200
+        return jsonify({"dates": dates, "equity": equity}), 200
     except Exception as e:
         print(f"Error occurred: {e}")
         return "", 400

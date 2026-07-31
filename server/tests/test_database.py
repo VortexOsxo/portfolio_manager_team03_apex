@@ -11,15 +11,15 @@ class TestGetTransactions:
     @patch("flaskr.services.database.read_query")
     def test_maps_rows_without_ticker_filter(self, mock_read_query):
         mock_read_query.return_value = [
-            (1, "AAPL", 10, 100.0, date(2024, 1, 1)),
-            (2, "MSFT", 5, 200.0, date(2024, 1, 2)),
+            (1, "buy", "AAPL", 10, 100.0, date(2024, 1, 1)),
+            (2, "buy", "MSFT", 5, 200.0, date(2024, 1, 2)),
         ]
 
         transactions = database.get_transactions()
 
         assert transactions == [
-            {"tr_id": 1, "ticker": "AAPL", "amount": 10, "cost_basis": 100.0, "transaction_date": date(2024, 1, 1)},
-            {"tr_id": 2, "ticker": "MSFT", "amount": 5, "cost_basis": 200.0, "transaction_date": date(2024, 1, 2)},
+            {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 10, "cost_basis": 100.0, "transaction_date": date(2024, 1, 1)},
+            {"tr_id": 2, "type": "buy", "ticker": "MSFT", "amount": 5, "cost_basis": 200.0, "transaction_date": date(2024, 1, 2)},
         ]
         query, params = mock_read_query.call_args.args
         assert "ticker = %s" not in query
@@ -27,7 +27,7 @@ class TestGetTransactions:
 
     @patch("flaskr.services.database.read_query")
     def test_filters_by_ticker(self, mock_read_query):
-        mock_read_query.return_value = [(1, "AAPL", 10, 100.0, date(2024, 1, 1))]
+        mock_read_query.return_value = [(1, "buy", "AAPL", 10, 100.0, date(2024, 1, 1))]
 
         transactions = database.get_transactions("AAPL")
 
@@ -177,30 +177,30 @@ class TestGetStockPerformance:
             "2026-01-05": 105.0,
         }
 
-        dates, performances = database.get_stock_performance("AAPL", "2026-01-01", "2026-01-05")
+        dates, equity = database.get_stock_performance("AAPL", "2026-01-01", "2026-01-05")
 
         assert dates == ["2026-01-02", "2026-01-05"]
-        assert performances == [100.0, 105.0]
+        assert equity == [100.0, 105.0]
 
     @patch("flaskr.services.database.YahooFinanceStock")
     def test_ticker_with_no_transactions_history_returns_empty_lists(self, mock_stock_cls):
         mock_stock_cls.get_market_trading_days.return_value = ["2026-01-02", "2026-01-05"]
         mock_stock_cls.return_value.get_daily_values.return_value = {}
 
-        dates, performances = database.get_stock_performance("NEWTICKER", "2026-01-01", "2026-01-05")
+        dates, equity = database.get_stock_performance("NEWTICKER", "2026-01-01", "2026-01-05")
 
         assert dates == []
-        assert performances == []
+        assert equity == []
 
     @patch("flaskr.services.database.YahooFinanceStock")
     def test_date_range_with_no_market_trading_days_returns_empty_lists(self, mock_stock_cls):
         mock_stock_cls.get_market_trading_days.return_value = []
         mock_stock_cls.return_value.get_daily_values.return_value = {"2026-01-03": 100.0}
 
-        dates, performances = database.get_stock_performance("AAPL", "2026-01-03", "2026-01-04")
+        dates, equity = database.get_stock_performance("AAPL", "2026-01-03", "2026-01-04")
 
         assert dates == []
-        assert performances == []
+        assert equity == []
 
 
 class TestSellHolding:

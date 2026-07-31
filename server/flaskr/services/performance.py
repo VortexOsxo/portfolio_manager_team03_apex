@@ -150,3 +150,39 @@ def compute_portfolio_values(dates, transactions, ticker_values):
         values.append(round(total_value, 2))
 
     return values
+
+
+def compute_cash_balances(dates, transactions):
+    ordered = sorted(
+        transactions,
+        key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
+    )
+    running_cash = 0.0
+    tx_index = 0
+    balances = []
+
+    for date in dates:
+        while tx_index < len(ordered):
+            tx = ordered[tx_index]
+            if _date_key(tx["transaction_date"]) > date:
+                break
+
+            tx_type = tx.get("type", "buy")
+            amount = float(tx["amount"])
+            cost_basis = tx.get("cost_basis")
+
+            if tx_type == "deposit":
+                running_cash += amount
+            elif tx_type == "withdrawal":
+                running_cash -= amount
+            else:
+                # buy:  amount positive  → delta is negative (cash out)
+                # sell: amount negative  → delta is positive (cash in)
+                if cost_basis is not None:
+                    running_cash -= amount * float(cost_basis)
+
+            tx_index += 1
+
+        balances.append(round(running_cash, 2))
+
+    return balances
