@@ -49,14 +49,16 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         database._PERFORMANCE_CACHE[("start", "end")] = {
             "created_at": 0,
             "dates": [],
-            "performances": [],
+            "equity": [],
+            "cash": [],
         }
 
         database.buy_holding("AAPL", 1, cost_basis=100, transaction_date="2026-01-02")
 
         self.assertEqual(database._PERFORMANCE_CACHE, {})
         mock_cursor.execute.assert_any_call(
-            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES ('buy', %s, %s, %s, %s)",
             ("AAPL", Decimal("1"), 100, "2026-01-02"),
         )
 
@@ -72,14 +74,16 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         database._PERFORMANCE_CACHE[("start", "end")] = {
             "created_at": 0,
             "dates": [],
-            "performances": [],
+            "equity": [],
+            "cash": [],
         }
 
         database.sell_holding("AAPL", 1, cost_basis=100, transaction_date="2026-01-02")
 
         self.assertEqual(database._PERFORMANCE_CACHE, {})
         mock_cursor.execute.assert_any_call(
-            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES ('sell', %s, %s, %s, %s)",
             ("AAPL", Decimal("-1"), 100, "2026-01-02"),
         )
 

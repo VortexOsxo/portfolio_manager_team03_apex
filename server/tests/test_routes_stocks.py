@@ -124,7 +124,9 @@ class TestPerformanceRoute:
         response = client.get("/stocks/performance?start_date=2026-01-01&end_date=2026-01-05")
 
         assert response.status_code == 200
-        assert response.get_json() == {"dates": ["2026-01-02"], "performances": [200.0]}
+        assert response.get_json()["dates"] == ["2026-01-02"]
+        assert response.get_json()["equity"] == [200.0]
+        assert "cash" in response.get_json()
 
     @patch("flaskr.services.database.get_transactions")
     def test_malformed_date_returns_500_with_a_json_error(self, mock_get_transactions, client):
@@ -156,7 +158,7 @@ class TestSingleTickerPerformanceRoute:
         response = client.get("/stocks/performance/AAPL?start_date=2026-01-01&end_date=2026-01-05")
 
         assert response.status_code == 200
-        assert response.get_json() == {"dates": ["2026-01-02"], "performances": [150.0]}
+        assert response.get_json() == {"dates": ["2026-01-02"], "equity": [150.0]}
 
     def test_malformed_date_returns_500_with_a_json_error(self, client):
         # Unlike the portfolio-wide route, this one has a doubled/nested

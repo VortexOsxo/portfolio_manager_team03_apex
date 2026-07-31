@@ -263,17 +263,17 @@ def get_portfolio_performance(start_date, end_date):
     with _PERFORMANCE_CACHE_LOCK:
         cached = _PERFORMANCE_CACHE.get(cache_key)
         if cached is not None and now - cached["created_at"] < _PERFORMANCE_CACHE_TTL_SECONDS:
-            return list(cached["dates"]), list(cached["performances"]), list(cached["cash_balances"])
+            return list(cached["dates"]), list(cached["equity"]), list(cached["cash"])
 
     equity_transactions = get_transactions()
     all_transactions = get_transactions(include_cash_transactions=True)
 
     tickers = performance.get_tickers_for_range(start_date, end_date, equity_transactions)
     if not tickers:
-        cash_balances = performance.compute_cash_balances(
+        cash = performance.compute_cash_balances(
             [], all_transactions
         )
-        return [], [], []
+        return [], [], cash
 
     all_values = YahooFinanceStock.get_daily_values_for_tickers(
         [*tickers, _MARKET_TICKER],
@@ -288,27 +288,27 @@ def get_portfolio_performance(start_date, end_date):
         ticker: all_values.get(ticker, {})
         for ticker in tickers
     }
-    performances = performance.compute_portfolio_values(dates, equity_transactions, ticker_values)
-    cash_balances = performance.compute_cash_balances(dates, all_transactions)
+    equity = performance.compute_portfolio_values(dates, equity_transactions, ticker_values)
+    cash = performance.compute_cash_balances(dates, all_transactions)
 
     with _PERFORMANCE_CACHE_LOCK:
         _PERFORMANCE_CACHE[cache_key] = {
             "created_at": time.monotonic(),
             "dates": list(dates),
-            "performances": list(performances),
-            "cash_balances": list(cash_balances),
+            "equity": list(equity),
+            "cash": list(cash),
         }
 
-    return dates, performances, cash_balances
+    return dates, equity, cash
 
 def get_stock_performance(ticker, start_date, end_date):
     market_dates = YahooFinanceStock.get_market_trading_days(start_date, end_date)
     ticker_values = YahooFinanceStock(ticker).get_daily_values(start_date, end_date)
 
-    stock_dates, performances = [], []
+    stock_dates, equity = [], []
     for date in market_dates:
         if date not in ticker_values:
             continue
         stock_dates.append(date)
-        performances.append(ticker_values[date])
-    return stock_dates, performances
+        equity.append(ticker_values[date])
+    return stock_dates, equity

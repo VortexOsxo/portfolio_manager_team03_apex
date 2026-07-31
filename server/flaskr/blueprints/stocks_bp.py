@@ -117,11 +117,11 @@ def get_performance():
         return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
     try:
-        dates, performances, cash_balances = get_portfolio_performance(start_date, end_date)
+        dates, equity, cash = get_portfolio_performance(start_date, end_date)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    return jsonify({"dates": dates, "performances": performances, "cash_balances": cash_balances}), 200
+    return jsonify({"dates": dates, "equity": equity, "cash": cash}), 200
 
 @stocks_bp.get("/performance/<string:ticker>")
 def get_stock_performance_route(ticker):
@@ -134,12 +134,12 @@ def get_stock_performance_route(ticker):
             return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
         try:
-            dates, performances = get_stock_performance(ticker, start_date, end_date)
+            dates, equity = get_stock_performance(ticker, start_date, end_date)
         except Exception as e:
             print(e)
             return jsonify({"error": str(e)}), 500
 
-        return jsonify({"dates": dates, "performances": performances}), 200
+        return jsonify({"dates": dates, "equity": equity}), 200
     except Exception as e:
         print(f"Error occurred: {e}")
         return "", 400
