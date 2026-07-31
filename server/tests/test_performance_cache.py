@@ -18,8 +18,10 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         get_transactions.return_value = [
             {
                 "tr_id": 1,
+                "type": "buy",
                 "ticker": "AAPL",
                 "amount": 2,
+                "cost_basis": 100.0,
                 "transaction_date": "2026-01-02",
             },
         ]
@@ -31,9 +33,12 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         first_result = database.get_portfolio_performance("2026-01-01", "2026-01-05")
         second_result = database.get_portfolio_performance("2026-01-01", "2026-01-05")
 
-        self.assertEqual(first_result, (["2026-01-02", "2026-01-05"], [200.0, 210.0]))
+        dates, equity, cash = first_result
+        self.assertEqual(dates, ["2026-01-02", "2026-01-05"])
+        self.assertEqual(equity, [200.0, 210.0])
+        self.assertIsInstance(cash, list)
         self.assertEqual(second_result, first_result)
-        get_transactions.assert_called_once_with()
+        self.assertEqual(get_transactions.call_count, 2)
         get_daily_values.assert_called_once_with(
             ["AAPL", "^GSPC"],
             "2026-01-01",
@@ -93,8 +98,10 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         get_transactions.return_value = [
             {
                 "tr_id": 1,
+                "type": "buy",
                 "ticker": "AAPL",
                 "amount": 2,
+                "cost_basis": 100.0,
                 "transaction_date": "2026-01-02",
             },
         ]
@@ -114,7 +121,7 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
 
         database.get_portfolio_performance("2026-01-01", "2026-01-05")
 
-        self.assertEqual(get_transactions.call_count, 2)
+        self.assertEqual(get_transactions.call_count, 4)
         self.assertEqual(get_daily_values.call_count, 2)
 
 

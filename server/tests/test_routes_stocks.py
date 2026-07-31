@@ -114,7 +114,7 @@ class TestPerformanceRoute:
     @patch("flaskr.services.database.get_transactions")
     def test_returns_dates_and_performances(self, mock_get_transactions, mock_get_daily_values, client):
         mock_get_transactions.return_value = [
-            {"tr_id": 1, "ticker": "AAPL", "amount": 2, "transaction_date": "2026-01-02"},
+            {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 2, "cost_basis": 100.0, "transaction_date": "2026-01-02"},
         ]
         mock_get_daily_values.return_value = {
             "AAPL": {"2026-01-02": 100.0},
@@ -134,7 +134,7 @@ class TestPerformanceRoute:
         # datetime.strptime deep inside YahooFinanceStock -- it raises, and
         # the route's blanket except turns it into a 500 (not a 400).
         mock_get_transactions.return_value = [
-            {"tr_id": 1, "ticker": "AAPL", "amount": 2, "transaction_date": "2026-01-02"},
+            {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 2, "cost_basis": 100.0, "transaction_date": "2026-01-02"},
         ]
 
         response = client.get("/stocks/performance?start_date=2026-01-01&end_date=not-a-date")

@@ -176,7 +176,10 @@ def compute_cash_balances(dates, transactions):
             elif tx_type == "withdrawal":
                 running_cash -= amount
             else:
-                running_cash -= amount * float(cost_basis)
+                # buy:  amount positive  → delta is negative (cash out)
+                # sell: amount negative  → delta is positive (cash in)
+                if cost_basis is not None:
+                    running_cash -= amount * float(cost_basis)
 
             tx_index += 1
 
