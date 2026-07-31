@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from flask import Blueprint, jsonify, request
 import mysql
 
@@ -6,6 +8,8 @@ from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
 stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
+
+_MAX_INFO_WORKERS = 10
 
 
 @stocks_bp.get("/search")
@@ -25,15 +29,18 @@ def _build_holdings():
     for tx in transactions:
         ticker = tx['ticker']
         amounts[ticker] = amounts.get(ticker, 0) + float(tx['amount'])
+    amounts = {ticker: amount for ticker, amount in amounts.items() if amount != 0}
 
     avg_costs, realized = performance.compute_positions(transactions)
 
+    # get_info() has no batch equivalent, so fetch each held ticker's quote concurrently instead of one network round trip
+    tickers = list(amounts.keys())
+    with ThreadPoolExecutor(max_workers=min(len(tickers), _MAX_INFO_WORKERS) or 1) as executor:
+        infos = dict(zip(tickers, executor.map(lambda t: YahooFinanceStock(t).get_info(), tickers)))
+
     holdings = {}
     for ticker, amount in amounts.items():
-        if amount == 0:
-            continue
-
-        info = YahooFinanceStock(ticker).get_info()
+        info = infos[ticker]
         current_price = info["current_price"]
         avg_cost = avg_costs.get(ticker)
 
