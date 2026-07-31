@@ -1,8 +1,7 @@
-from decimal import Decimal
-
 from flask import Blueprint, jsonify, request
 
 from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_transactions
+from flaskr.services.validation import parse_positive_amount
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
 
@@ -11,15 +10,7 @@ def _parse_amount(data):
     if not data or "amount" not in data:
         return None, "amount is required"
 
-    try:
-        amount = Decimal(str(data["amount"]))
-    except Exception:
-        return None, "amount must be a number"
-
-    if amount <= 0:
-        return None, "amount must be greater than zero"
-
-    return amount, None
+    return parse_positive_amount(data["amount"])
 
 
 @accounts_bp.get("/balance")

@@ -70,13 +70,13 @@ class TestDepositRoute:
         assert response.status_code == 400
         assert response.get_json() == {"error": "amount must be a number"}
 
-    def test_nan_amount_crashes_with_500(self, client):
-        # Decimal("NaN") <= 0 raises decimal.InvalidOperation instead of
-        # evaluating to False, so _parse_amount's own validation crashes
-        # instead of rejecting it cleanly.
+    def test_nan_amount_returns_400(self, client):
+        # parse_positive_amount checks is_nan() before ever comparing with
+        # <= 0, so this is now a clean rejection instead of a crash.
         response = client.post("/accounts/deposit", json={"amount": "NaN"})
 
-        assert response.status_code == 500
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be a number"}
 
     @patch("flaskr.blueprints.accounts_bp.update_account_balance")
     @patch("flaskr.blueprints.accounts_bp.get_account_balance")
