@@ -8,7 +8,12 @@ from flaskr import create_app
 @pytest.fixture
 def app():
     app = create_app()
-    app.config.update(TESTING=True)
+    # TESTING=True alone also flips on PROPAGATE_EXCEPTIONS, which makes an
+    # unhandled exception raise straight through client.get()/post() instead
+    # of coming back as the 500 response a real deployment would return.
+    # Explicitly forcing it off here so route tests can characterize actual
+    # HTTP behavior instead of catching a raised exception in the test.
+    app.config.update(TESTING=True, PROPAGATE_EXCEPTIONS=False)
     return app
 
 
