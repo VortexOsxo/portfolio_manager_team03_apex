@@ -43,7 +43,7 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
     @patch("flaskr.services.database.get_db_connection")
     def test_buy_invalidates_cached_ranges(self, get_db_connection):
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (0,)
+        mock_cursor.fetchone.return_value = (Decimal("30000.00"),)
         get_db_connection.return_value.cursor.return_value = mock_cursor
 
         database._PERFORMANCE_CACHE[("start", "end")] = {
@@ -56,7 +56,7 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
 
         self.assertEqual(database._PERFORMANCE_CACHE, {})
         mock_cursor.execute.assert_any_call(
-            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
             ("AAPL", Decimal("1"), 100, "2026-01-02"),
         )
 

@@ -9,8 +9,6 @@ import mysql.connector
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock
 
-INITIAL_CASH = Decimal(str(os.getenv("INITIAL_CASH", "30000.00")))
-
 _PERFORMANCE_CACHE = {}
 _PERFORMANCE_CACHE_LOCK = Lock()
 _PERFORMANCE_CACHE_TTL_SECONDS = 300
@@ -75,6 +73,32 @@ def get_transactions(ticker = None, start_date = None, end_date = None):
         for tr_id, tx_ticker, amount, cost_basis, transaction_date in read_query(query, params)
     ]
 
+
+def get_account_balance(account_id=1):
+    result = read_query("SELECT balance FROM accounts WHERE id = %s;", (account_id,))
+    if not result:
+        raise ValueError(f"Account {account_id} not found")
+    return Decimal(str(result[0][0] or 0))
+
+
+def update_account_balance(amount, account_id=1, cursor=None):
+    """Debit/credit the account balance.
+
+    Pass an existing `cursor` to run this as part of a caller's transaction
+    (e.g. one already holding a `SELECT ... FOR UPDATE` lock on the row) so
+    the update is covered by that lock instead of committing independently
+    on its own connection.
+    """
+    amount = Decimal(str(amount))
+    query = "UPDATE accounts SET balance = balance + %s WHERE id = %s;"
+    params = (amount, account_id)
+
+    if cursor is not None:
+        cursor.execute(query, params)
+    else:
+        write_query(query, params)
+
+
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(Decimal(str(amount)))
 
@@ -96,11 +120,10 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # FOR UPDATE locks the rows this balance is derived from, so a
-        # concurrent buy blocks here instead of reading the same
-        # not-yet-committed balance and also passing the check.
-        cursor.execute("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions FOR UPDATE;")
-        cash_balance = INITIAL_CASH - Decimal(str(cursor.fetchone()[0]))
+        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (1,))
+        row = cursor.fetchone()
+
+        cash_balance = Decimal(str(row[0] or 0))
         if total_cost > cash_balance:
             raise ValueError(
                 f"Insufficient cash: buying {amount} shares of {ticker} at {cost_basis} "
@@ -108,9 +131,10 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
             )
 
         cursor.execute(
-            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
             (ticker, amount, cost_basis, transaction_date)
         )
+        update_account_balance(-total_cost, account_id=1, cursor=cursor)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -120,10 +144,6 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         conn.close()
 
     clear_performance_cache()
-
-def get_cash_balance():
-    result = read_query("SELECT COALESCE(SUM(amount * cost_basis), 0) FROM transactions;")
-    return INITIAL_CASH - Decimal(str(result[0][0]))
 
 def get_holding_amount(ticker, date=None):
     query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s" +\
@@ -146,10 +166,23 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    write_query(
-        "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s);",
-        (ticker, -amount, cost_basis, transaction_date)
-    )
+    total_proceeds = amount * Decimal(str(cost_basis))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
+            (ticker, -amount, cost_basis, transaction_date)
+        )
+        update_account_balance(total_proceeds, account_id=1, cursor=cursor)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
     clear_performance_cache()
 
 def get_traded_tickers():
