@@ -107,6 +107,12 @@ def update_account_balance(amount, account_id=1, cursor=None):
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(Decimal(str(amount)))
 
+    if amount == 0:
+        raise ValueError("amount must be greater than zero")
+
+    if len(ticker) > 10:
+        raise ValueError(f"ticker must be at most 10 characters, got {len(ticker)}")
+
     if cost_basis is None:
         # Price lookup needs the local trading day, not a UTC-shifted one --
         # near UTC rollover, "now" in UTC can already read as "tomorrow", a
@@ -116,6 +122,9 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
 
     if cost_basis is None:
         raise ValueError(f"No price data available for {ticker} on {price_lookup_date}")
+
+    if Decimal(str(cost_basis)) <= 0:
+        raise ValueError("cost_basis must be greater than zero")
 
     total_cost = amount * Decimal(str(cost_basis))
 
@@ -221,6 +230,13 @@ def get_holding_amount(ticker, date=None):
 
 def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(Decimal(str(amount)))
+
+    if amount == 0:
+        raise ValueError("amount must be greater than zero")
+
+    if len(ticker) > 10:
+        raise ValueError(f"ticker must be at most 10 characters, got {len(ticker)}")
+
     current_amount = Decimal(str(get_holding_amount(ticker)))
     if amount > current_amount:
         raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
@@ -228,6 +244,9 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     if cost_basis is None:
         price_lookup_date = transaction_date if transaction_date is not None else datetime.now().date()
         cost_basis = YahooFinanceStock(ticker).get_price_on_date(price_lookup_date)
+
+    if Decimal(str(cost_basis)) <= 0:
+        raise ValueError("cost_basis must be greater than zero")
 
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)

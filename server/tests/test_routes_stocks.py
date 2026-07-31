@@ -221,32 +221,26 @@ class TestBuyRoute:
         assert response.status_code == 400
         assert response.get_json() == {"error": "amount must be a number"}
 
-    def test_zero_amount_is_silently_accepted(self, client, mock_db_conn):
-        mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
-
+    def test_zero_amount_returns_400(self, client):
         response = client.post("/stocks/buy", json={"ticker": "AAPL", "amount": 0, "cost_basis": 100})
 
-        assert response.status_code == 201
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be greater than zero"}
 
-    def test_negative_cost_basis_is_silently_accepted(self, client, mock_db_conn):
-        mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
-
+    def test_negative_cost_basis_returns_400(self, client):
         response = client.post("/stocks/buy", json={"ticker": "AAPL", "amount": 1, "cost_basis": -50})
 
-        assert response.status_code == 201
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "cost_basis must be greater than zero"}
 
-    def test_ticker_longer_than_ten_chars_is_not_rejected_at_the_app_layer(self, client, mock_db_conn):
-        # The `transactions.ticker` column is VARCHAR(10); the app never
-        # checks length before inserting. Whether this actually errors
-        # depends on the real DB/SQL mode, which a mocked connection can't
-        # show -- this only documents that nothing stops it at this layer.
-        mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
-
+    def test_ticker_longer_than_ten_chars_returns_400(self, client):
+        # The `transactions.ticker` column is VARCHAR(10).
         response = client.post(
             "/stocks/buy", json={"ticker": "WAYTOOLONGTICKER", "amount": 1, "cost_basis": 50}
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 400
+        assert "10 characters" in response.get_json()["error"]
 
     @patch("flaskr.blueprints.stocks_bp.buy_holding")
     def test_integrity_error_returns_400_with_empty_body(self, mock_buy, client):
@@ -291,6 +285,30 @@ class TestSellRoute:
         response = client.post("/stocks/sell")
 
         assert response.status_code == 415
+
+    def test_zero_amount_returns_400(self, client):
+        # Checked before the holdings lookup, so no DB access happens.
+        response = client.post("/stocks/sell", json={"ticker": "AAPL", "amount": 0, "cost_basis": 100})
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be greater than zero"}
+
+    def test_ticker_longer_than_ten_chars_returns_400(self, client):
+        response = client.post(
+            "/stocks/sell", json={"ticker": "WAYTOOLONGTICKER", "amount": 1, "cost_basis": 50}
+        )
+
+        assert response.status_code == 400
+        assert "10 characters" in response.get_json()["error"]
+
+    @patch("flaskr.services.database.get_holding_amount")
+    def test_negative_cost_basis_returns_400(self, mock_get_amount, client):
+        mock_get_amount.return_value = 10
+
+        response = client.post("/stocks/sell", json={"ticker": "AAPL", "amount": 1, "cost_basis": -50})
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "cost_basis must be greater than zero"}
 
     @patch("flaskr.blueprints.stocks_bp.sell_holding")
     def test_selling_more_than_owned_returns_400_with_json_error(self, mock_sell, client):
