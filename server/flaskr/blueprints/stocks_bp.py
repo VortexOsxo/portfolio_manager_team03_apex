@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from decimal import InvalidOperation
 
 from flask import Blueprint, jsonify, request
 import mysql
@@ -180,6 +181,8 @@ def buy_stock():
         buy_holding(ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError as e:
         return "", 400
+    except InvalidOperation:
+        return jsonify({"error": "amount must be a number"}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -200,6 +203,8 @@ def sell_stock():
         sell_holding(ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError as e:
         return "", 400
+    except InvalidOperation:
+        return jsonify({"error": "amount must be a number"}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 

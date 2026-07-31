@@ -211,14 +211,15 @@ class TestBuyRoute:
 
         assert response.status_code == 415
 
-    def test_non_numeric_amount_crashes_with_500(self, client, mock_db_conn):
-        # decimal.InvalidOperation from Decimal(str("abc")) isn't caught by
-        # the route's except IntegrityError / except ValueError.
+    def test_non_numeric_amount_returns_400(self, client):
+        # decimal.InvalidOperation from Decimal(str("abc")) is now caught and
+        # translated to a clean 400 instead of crashing.
         response = client.post(
             "/stocks/buy", json={"ticker": "AAPL", "amount": "abc", "cost_basis": 100}
         )
 
-        assert response.status_code == 500
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be a number"}
 
     def test_zero_amount_is_silently_accepted(self, client, mock_db_conn):
         mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
@@ -302,11 +303,12 @@ class TestSellRoute:
         assert response.status_code == 400
         assert "only 3 available" in response.get_json()["error"]
 
-    def test_non_numeric_amount_crashes_with_500(self, client):
-        # Decimal(str("abc")) raises decimal.InvalidOperation before
-        # sell_holding ever touches the DB, same gap as the buy route.
+    def test_non_numeric_amount_returns_400(self, client):
+        # decimal.InvalidOperation from Decimal(str("abc")) is now caught and
+        # translated to a clean 400 instead of crashing, same as the buy route.
         response = client.post(
             "/stocks/sell", json={"ticker": "AAPL", "amount": "abc", "cost_basis": 100}
         )
 
-        assert response.status_code == 500
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be a number"}
