@@ -1,10 +1,10 @@
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 
 from flaskr.services import database
-from decimal import Decimal
 
 
 class TestGetTransactions:
@@ -22,8 +22,8 @@ class TestGetTransactions:
             {"tr_id": 2, "ticker": "MSFT", "amount": 5, "cost_basis": 200.0, "transaction_date": date(2024, 1, 2)},
         ]
         query, params = mock_read_query.call_args.args
-        assert "WHERE" not in query
-        assert params is None
+        assert "ticker = %s" not in query
+        assert params == ()
 
     @patch("flaskr.services.database.read_query")
     def test_filters_by_ticker(self, mock_read_query):
@@ -33,7 +33,7 @@ class TestGetTransactions:
 
         assert len(transactions) == 1
         query, params = mock_read_query.call_args.args
-        assert "WHERE ticker = %s" in query
+        assert "AND ticker = %s" in query
         assert params == ("AAPL",)
 
 
@@ -83,6 +83,19 @@ class TestBuyHolding:
         stored_date = mock_cursor.execute.call_args_list[1][0][1][3]
         assert before <= stored_date <= after
 
+    @patch("flaskr.services.database.get_db_connection")
+    def test_raises_when_cash_balance_is_insufficient(self, mock_get_db_connection):
+        mock_conn = mock_get_db_connection.return_value
+        mock_cursor = mock_conn.cursor.return_value
+        mock_cursor.fetchone.return_value = (Decimal("100.00"),)
+
+        with pytest.raises(ValueError, match="Insufficient cash"):
+            database.buy_holding("AAPL", 10, cost_basis=150.0, transaction_date=date(2024, 1, 1))
+
+        mock_cursor.execute.assert_called_once()  # only the balance check, no INSERT
+        mock_conn.rollback.assert_called_once()
+        mock_conn.commit.assert_not_called()
+
 
 class TestGetCashBalance:
     @patch("flaskr.services.database.read_query")
@@ -103,8 +116,8 @@ class TestSellHolding:
 
         database.sell_holding("AAPL", 5, cost_basis=160.0, transaction_date=date(2024, 1, 3))
 
-        assert mock_cursor.execute.call_args_list[1][0][1] == ("AAPL", -5, 160.0, date(2024, 1, 3))
-        assert mock_cursor.execute.call_args_list[2][0][0].startswith("UPDATE accounts SET balance")
+        assert mock_cursor.execute.call_args_list[0][0][1] == ("AAPL", -5, 160.0, date(2024, 1, 3))
+        assert mock_cursor.execute.call_args_list[1][0][0].startswith("UPDATE accounts SET balance")
 
     @patch("flaskr.services.database.get_holding_amount")
     def test_raises_when_selling_more_than_owned(self, mock_get_amount):
@@ -134,4 +147,4 @@ class TestSellHolding:
         database.sell_holding("AAPL", 5, transaction_date=date(2024, 1, 3))
 
         mock_stock_cls.return_value.get_price_on_date.assert_called_once_with(date(2024, 1, 3))
-        assert mock_cursor.execute.call_args_list[1][0][1] == ("AAPL", -5, 180.0, date(2024, 1, 3))
+        assert mock_cursor.execute.call_args_list[0][0][1] == ("AAPL", -5, 180.0, date(2024, 1, 3))
