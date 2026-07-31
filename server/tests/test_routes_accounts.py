@@ -78,17 +78,13 @@ class TestDepositRoute:
         assert response.status_code == 400
         assert response.get_json() == {"error": "amount must be a number"}
 
-    @patch("flaskr.blueprints.accounts_bp.update_account_balance")
-    @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_infinity_amount_is_silently_accepted(self, mock_get_balance, mock_update, client):
-        # Decimal("Infinity") <= 0 is False, so it passes _parse_amount's
-        # only check and is passed straight through to update_account_balance.
-        mock_get_balance.return_value = Decimal("100.00")
-
+    def test_infinity_amount_returns_400(self, client):
+        # parse_positive_amount now checks is_infinite() explicitly, since
+        # Decimal("Infinity") <= 0 is False and would otherwise pass through.
         response = client.post("/accounts/deposit", json={"amount": "Infinity"})
 
-        assert response.status_code == 201
-        mock_update.assert_called_once_with(Decimal("Infinity"), account_id=1)
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be a finite number"}
 
     @patch("flaskr.blueprints.accounts_bp.update_account_balance")
     @patch("flaskr.blueprints.accounts_bp.get_account_balance")

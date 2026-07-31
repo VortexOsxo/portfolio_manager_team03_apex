@@ -14,6 +14,9 @@ def parse_positive_amount(raw_value):
     if amount.is_nan():
         return None, "amount must be a number"
 
+    if amount.is_infinite():
+        return None, "amount must be a finite number"
+
     if amount <= 0:
         return None, "amount must be greater than zero"
 
