@@ -86,17 +86,13 @@ class TestDepositRoute:
         assert response.status_code == 400
         assert response.get_json() == {"error": "amount must be a finite number"}
 
-    @patch("flaskr.blueprints.accounts_bp.update_account_balance")
-    @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_amount_finer_than_cents_is_silently_accepted(self, mock_get_balance, mock_update, client):
-        # The accounts.balance column is decimal(15,2); nothing here checks
-        # precision before the value reaches the DB layer.
-        mock_get_balance.return_value = Decimal("100.00")
-
+    def test_amount_finer_than_cents_returns_400(self, client):
+        # The accounts.balance column is decimal(15,2); parse_positive_amount
+        # now rejects anything with more than 2 fractional digits.
         response = client.post("/accounts/deposit", json={"amount": 0.001})
 
-        assert response.status_code == 201
-        mock_update.assert_called_once_with(Decimal("0.001"), account_id=1)
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount cannot have more than 2 decimal places"}
 
 
 class TestWithdrawRoute:

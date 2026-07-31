@@ -20,4 +20,7 @@ def parse_positive_amount(raw_value):
     if amount <= 0:
         return None, "amount must be greater than zero"
 
+    if amount.as_tuple().exponent < -2:
+        return None, "amount cannot have more than 2 decimal places"
+
     return amount, None
