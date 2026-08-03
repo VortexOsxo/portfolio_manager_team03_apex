@@ -8,14 +8,21 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
 
+MIN_USERNAME_LENGTH = 3
+MIN_PASSWORD_LENGTH = 8
+
 
 @accounts_bp.post("/signup")
 def signup():
     body = request.get_json()
     username = body.get('username')
     password = body.get('password')
-    if username is None or password is None:
+    if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
+    if len(username) < MIN_USERNAME_LENGTH:
+        return jsonify({"error": f"Choose a username with at least {MIN_USERNAME_LENGTH} characters."}), 400
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return jsonify({"error": f"Choose a password with at least {MIN_PASSWORD_LENGTH} characters to help keep your account secure."}), 400
 
     result = create_user(username=username, password=generate_password_hash(password))
     if not result:
@@ -31,7 +38,7 @@ def login():
     body = request.get_json()
     username = body.get('username')
     password = body.get('password')
-    if username is None or password is None:
+    if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
 
     user = get_user(username)
