@@ -16,12 +16,8 @@ const PERFORMANCE_RANGES = [
   { label: "1Y", months: 12 },
 ];
 
-// Matches the backend's _PERFORMANCE_CACHE_TTL_SECONDS, so client and server
-// go stale together instead of the client trusting a long-dead server cache.
 const PERFORMANCE_CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Matches --accent-solid / the modal-panel surface in styles.css -- kept as
-// literals since Recharts props need plain color strings, not CSS vars.
 const CHART_ACCENT = "#6d6cff";
 const CHART_SURFACE = "#12142a";
 
@@ -33,6 +29,40 @@ const formatCurrency = (value) => {
     maximumFractionDigits: 2,
   });
   return `${sign}$${formatted}`;
+};
+
+const formatAmountForDisplay = (raw) => {
+  if (!raw) return "";
+  const [intPart, decPart] = raw.split(".");
+  const formattedInt = intPart === "" ? "" : Number(intPart).toLocaleString("en-US");
+  return decPart !== undefined ? `${formattedInt}.${decPart}` : formattedInt;
+};
+
+const makeAmountChangeHandler = (setter, clearError) => (e) => {
+  const input = e.target;
+  const rawInput = input.value;
+  const cursorPos = input.selectionStart ?? rawInput.length;
+  const digitsBeforeCursor = rawInput.slice(0, cursorPos).replace(/[^\d.]/g, "").length;
+
+  const stripped = rawInput.replace(/,/g, "");
+  if (!/^\d*\.?\d*$/.test(stripped)) return;
+
+  setter(stripped);
+  if (clearError) clearError(null);
+
+  requestAnimationFrame(() => {
+    const formatted = formatAmountForDisplay(stripped);
+    let seen = 0;
+    let newPos = formatted.length;
+    for (let i = 0; i < formatted.length; i += 1) {
+      if (/\d|\./.test(formatted[i])) seen += 1;
+      if (seen === digitsBeforeCursor) {
+        newPos = i + 1;
+        break;
+      }
+    }
+    input.setSelectionRange(newPos, newPos);
+  });
 };
 
 const formatPercent = (value) => {
@@ -325,6 +355,12 @@ function Dashboard({ username, onLogout }) {
   const [submitting, setSubmitting] = useState(false);
   const [tradeError, setTradeError] = useState(null);
   const [tickerResults, setTickerResults] = useState([]);
+  const [lookupError, setLookupError] = useState(null);
+
+  const [fundType, setFundType] = useState("deposit");
+  const [fundAmount, setFundAmount] = useState("");
+  const [fundSubmitting, setFundSubmitting] = useState(false);
+  const [fundError, setFundError] = useState(null);
 
   const [historyTicker, setHistoryTicker] = useState(null);
   const [historyTransactions, setHistoryTransactions] = useState([]);
@@ -333,6 +369,20 @@ function Dashboard({ username, onLogout }) {
   const [historyPerformance, setHistoryPerformance] = useState([]);
   const [historyPerformanceLoading, setHistoryPerformanceLoading] = useState(false);
   const [modalClosing, setModalClosing] = useState(false);
+  const activeHistoryRequestRef = useRef(0);
+
+  const [quote, setQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState(null);
+
+  const [showRealizedModal, setShowRealizedModal] = useState(false);
+  const [realizedModalClosing, setRealizedModalClosing] = useState(false);
+
+  const [showCashModal, setShowCashModal] = useState(false);
+  const [cashModalClosing, setCashModalClosing] = useState(false);
+  const [cashTransactions, setCashTransactions] = useState([]);
+  const [cashTransactionsLoading, setCashTransactionsLoading] = useState(false);
+  const [cashTransactionsError, setCashTransactionsError] = useState(null);
 
   const [performanceRange, setPerformanceRange] = useState("3M");
   const [performanceData, setPerformanceData] = useState([]);
@@ -377,6 +427,16 @@ function Dashboard({ username, onLogout }) {
   }, []);
 
   useEffect(() => {
+    if (!(historyTicker || showRealizedModal || showCashModal)) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [historyTicker, showRealizedModal, showCashModal]);
+
+  useEffect(() => {
     if (activeView !== "performance") return undefined;
 
     const { startDate, endDate } = performanceDateRange;
@@ -406,11 +466,12 @@ function Dashboard({ username, onLogout }) {
       .then((data) => {
         const dates = Array.isArray(data.dates) ? data.dates : [];
         const equity = Array.isArray(data.equity) ? data.equity : [];
+        const cash = Array.isArray(data.cash) ? data.cash : [];
         const chartData = dates
           .slice(0, equity.length)
           .map((date, index) => ({
             date,
-            value: Number(equity[index]),
+            value: Number(equity[index]) + Number(cash[index] ?? 0),
           }))
           .filter((point) => Number.isFinite(point.value));
         performanceCacheRef.current.set(cacheKey, { data: chartData, cachedAt: Date.now() });
@@ -427,32 +488,37 @@ function Dashboard({ username, onLogout }) {
   }, [activeView, performanceDateRange, performanceRequestKey]);
 
   useEffect(() => {
-    // selling only happens to what we already own, so no need to search for tickers when selling
-    if (tradeType === "sell" || !ticker.trim()) {
+    if (!ticker.trim()) {
       setTickerResults([]);
-      return;
+      return undefined;
     }
 
+    const controller = new AbortController();
     const handle = setTimeout(() => {
-      authFetch(`/api/stocks/search?q=${encodeURIComponent(ticker)}`)
+      authFetch(`/api/stocks/search?q=${encodeURIComponent(ticker)}`, { signal: controller.signal })
         .then((res) => (res.ok ? res.json() : []))
-        .then((data) => setTickerResults(data))
-        .catch(() => setTickerResults([]));
+        .then((data) => setTickerResults(Array.isArray(data) ? data : []))
+        .catch((err) => {
+          if (err.name !== "AbortError") setTickerResults([]);
+        });
     }, 300);
 
-    return () => clearTimeout(handle);
-  }, [ticker, tradeType]);
+    return () => {
+      clearTimeout(handle);
+      controller.abort();
+    };
+  }, [ticker]);
 
   const tickerLookup = useMemo(() => {
     const map = new Map();
     holdings.forEach((h) => map.set(h.ticker, h.name));
-    if (tradeType !== "sell") {
-      tickerResults.forEach((r) => map.set(r.ticker, r.name));
-    }
+    tickerResults.forEach((r) => map.set(r.ticker, r.name));
     return map;
-  }, [holdings, tickerResults, tradeType]);
+  }, [holdings, tickerResults]);
 
-  const isValidTicker = tickerLookup.has(ticker.toUpperCase());
+  const ownedHolding = historyTicker ? holdings.find((h) => h.ticker === historyTicker) : null;
+
+  const realizedLots = summary?.realized_lots ?? [];
 
   const performanceStats = useMemo(() => {
     if (performanceData.length === 0) return null;
@@ -478,24 +544,42 @@ function Dashboard({ username, onLogout }) {
 
   const handleTickerChange = (e) => {
     setTicker(e.target.value);
+    setLookupError(null);
   };
 
   const handleAmountChange = (e) => {
     const value = e.target.value;
     if (/^\d*\.?\d*$/.test(value)) {
       setAmount(value);
+      setTradeError(null);
     }
   };
 
   const handleTrade = (e) => {
     e.preventDefault();
-    if (!isValidTicker) {
-      setTradeError("Pick a ticker from the list");
+    if (!quote || !quote.current_price) {
+      setTradeError("No live price available for this ticker right now");
       return;
     }
     if (!(Number(amount) > 0)) {
       setTradeError("Enter an amount greater than 0");
       return;
+    }
+    if (tradeType === "buy" && summary?.cash_balance != null) {
+      const estimatedCost = Number(amount) * quote.current_price;
+      if (estimatedCost > summary.cash_balance) {
+        setTradeError(
+          `This would cost about ${formatCurrency(estimatedCost)}, but you only have ${formatCurrency(summary.cash_balance)} available.`
+        );
+        return;
+      }
+    }
+    if (tradeType === "sell") {
+      const ownedAmount = ownedHolding ? Number(ownedHolding.amount) : 0;
+      if (Number(amount) > ownedAmount) {
+        setTradeError(`You only have ${ownedAmount} shares of ${historyTicker} available to sell.`);
+        return;
+      }
     }
     setTradeError(null);
     setSubmitting(true);
@@ -503,7 +587,7 @@ function Dashboard({ username, onLogout }) {
     authFetch(`/api/stocks/${tradeType}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker: ticker.toUpperCase(), amount: Number(amount) }),
+      body: JSON.stringify({ ticker: historyTicker, amount: Number(amount) }),
     })
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
@@ -511,20 +595,107 @@ function Dashboard({ username, onLogout }) {
         return body;
       })
       .then(() => {
-        setTicker("");
         setAmount("");
         performanceCacheRef.current.clear();
         fetchHoldings();
+        fetchHistoryTransactions(historyTicker, activeHistoryRequestRef.current);
       })
       .catch((err) => setTradeError(err.message))
       .finally(() => setSubmitting(false));
   };
 
+  const handleTickerLookupSubmit = (e) => {
+    e.preventDefault();
+    const symbol = ticker.trim().toUpperCase();
+    if (!symbol) return;
+    if (!tickerLookup.has(symbol)) {
+      setLookupError(`"${ticker}" isn't one of the companies from the search — pick one from the list.`);
+      return;
+    }
+    setTicker("");
+    setTickerResults([]);
+    setLookupError(null);
+    openHistory(symbol);
+  };
+
+  const handleFundSubmit = (e) => {
+    e.preventDefault();
+    if (!(Number(fundAmount) > 0)) {
+      setFundError("Enter an amount greater than 0");
+      return;
+    }
+    if (fundType === "withdraw" && summary?.cash_balance != null && Number(fundAmount) > summary.cash_balance) {
+      setFundError(
+      `You only have ${formatCurrency(summary.cash_balance)} available to withdraw.`
+      );
+      return;
+      }
+    setFundError(null);
+    setFundSubmitting(true);
+
+    fetch(`/api/accounts/${fundType}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: Number(fundAmount) }),
+    })
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `${fundType} failed (status ${res.status})`);
+        return body;
+      })
+      .then(() => {
+        setFundAmount("");
+        fetchHoldings();
+        fetchCashTransactions();
+      })
+      .catch((err) => setFundError(err.message))
+      .finally(() => setFundSubmitting(false));
+  };
+
+  const fetchHistoryTransactions = (tickerSymbol, requestId) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    return fetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryTransactions(data);
+      })
+      .catch((err) => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryError(err.message);
+      })
+      .finally(() => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryLoading(false);
+      });
+  };
+
+  const fetchQuote = (tickerSymbol, requestId) => {
+    setQuote(null);
+    setQuoteLoading(true);
+    setQuoteError(null);
+    return fetch(`/api/stocks/quote/${encodeURIComponent(tickerSymbol)}`)
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `Couldn't find "${tickerSymbol}"`);
+        return body;
+      })
+      .then((data) => {
+        if (requestId === activeHistoryRequestRef.current) setQuote(data);
+      })
+      .catch((err) => {
+        if (requestId === activeHistoryRequestRef.current) setQuoteError(err.message);
+      })
+      .finally(() => {
+        if (requestId === activeHistoryRequestRef.current) setQuoteLoading(false);
+      });
+  };
+
   const openHistory = (tickerSymbol) => {
+    const requestId = (activeHistoryRequestRef.current += 1);
     setHistoryTicker(tickerSymbol);
     setHistoryTransactions([]);
-    setHistoryError(null);
-    setHistoryLoading(true);
     setHistoryPerformance([]);
     setHistoryPerformanceLoading(true);
 
@@ -537,10 +708,18 @@ function Dashboard({ username, onLogout }) {
       .catch((err) => setHistoryError(err.message))
       .finally(() => setHistoryLoading(false));
 
+    setTradeType("buy");
+    setAmount("");
+    setTradeError(null);
+
+    fetchHistoryTransactions(tickerSymbol, requestId);
+    fetchQuote(tickerSymbol, requestId);
+
     const { startDate, endDate } = getPerformanceDates("3M");
     authFetch(`/api/stocks/performance/${encodeURIComponent(tickerSymbol)}?start_date=${startDate}&end_date=${endDate}`)
       .then((res) => (res.ok ? res.json() : { dates: [], equity: [] }))
       .then((data) => {
+        if (requestId !== activeHistoryRequestRef.current) return;
         const dates = Array.isArray(data.dates) ? data.dates : [];
         const equity = Array.isArray(data.equity) ? data.equity : [];
         const chartData = dates
@@ -549,8 +728,12 @@ function Dashboard({ username, onLogout }) {
           .filter((point) => Number.isFinite(point.value));
         setHistoryPerformance(chartData);
       })
-      .catch(() => setHistoryPerformance([]))
-      .finally(() => setHistoryPerformanceLoading(false));
+      .catch(() => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryPerformance([]);
+      })
+      .finally(() => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryPerformanceLoading(false);
+      });
   };
 
   const closeHistory = () => {
@@ -560,7 +743,83 @@ function Dashboard({ username, onLogout }) {
       setHistoryTransactions([]);
       setHistoryError(null);
       setHistoryPerformance([]);
+      setQuote(null);
+      setQuoteError(null);
       setModalClosing(false);
+    }, 180);
+  };
+
+  const closeRealizedModal = () => {
+    setRealizedModalClosing(true);
+    setTimeout(() => {
+      setShowRealizedModal(false);
+      setRealizedModalClosing(false);
+    }, 180);
+  };
+
+  const fetchCashTransactions = () => {
+    setCashTransactionsLoading(true);
+    setCashTransactionsError(null);
+    return fetch(`/api/accounts/transactions`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => setCashTransactions(data))
+      .catch((err) => setCashTransactionsError(err.message))
+      .finally(() => setCashTransactionsLoading(false));
+  };
+
+  const openCashModal = () => {
+    setShowCashModal(true);
+    setFundType("deposit");
+    setFundAmount("");
+    setFundError(null);
+    fetchCashTransactions();
+  };
+
+  const closeCashModal = () => {
+    setCashModalClosing(true);
+    setTimeout(() => {
+      setShowCashModal(false);
+      setCashModalClosing(false);
+    }, 180);
+  };
+
+  const closeRealizedModal = () => {
+    setRealizedModalClosing(true);
+    setTimeout(() => {
+      setShowRealizedModal(false);
+      setRealizedModalClosing(false);
+    }, 180);
+  };
+
+  const fetchCashTransactions = () => {
+    setCashTransactionsLoading(true);
+    setCashTransactionsError(null);
+    return fetch(`/api/accounts/transactions`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        return res.json();
+      })
+      .then((data) => setCashTransactions(data))
+      .catch((err) => setCashTransactionsError(err.message))
+      .finally(() => setCashTransactionsLoading(false));
+  };
+
+  const openCashModal = () => {
+    setShowCashModal(true);
+    setFundType("deposit");
+    setFundAmount("");
+    setFundError(null);
+    fetchCashTransactions();
+  };
+
+  const closeCashModal = () => {
+    setCashModalClosing(true);
+    setTimeout(() => {
+      setShowCashModal(false);
+      setCashModalClosing(false);
     }, 180);
   };
 
@@ -662,7 +921,13 @@ function Dashboard({ username, onLogout }) {
                 )}
               </article>
 
-              <article className="summary-card">
+              <article
+                className="summary-card clickable"
+                onClick={openCashModal}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && openCashModal()}
+              >
                 <p className="summary-label">Cash available</p>
                 {loading && !summary ? (
                   <p className="summary-value"><span className="skeleton-block" style={{ width: "90px", height: "22px" }} /></p>
@@ -671,7 +936,13 @@ function Dashboard({ username, onLogout }) {
                 )}
               </article>
 
-              <article className="summary-card">
+              <article
+                className="summary-card clickable"
+                onClick={() => setShowRealizedModal(true)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setShowRealizedModal(true)}
+              >
                 <p className="summary-label">Realized P&amp;L</p>
                 {loading && !summary ? (
                   <p className="summary-value"><span className="skeleton-block" style={{ width: "90px", height: "22px" }} /></p>
@@ -704,13 +975,14 @@ function Dashboard({ username, onLogout }) {
                         <th>Price</th>
                         <th>Day change</th>
                         <th>Value</th>
+                        <th>% Portfolio</th>
                         <th>Unrealized P&amp;L</th>
                       </tr>
                     </thead>
                     <tbody>
                       {Array.from({ length: 5 }).map((_, i) => (
                         <tr key={i} className="skeleton-row" style={{ animationDelay: `${i * 60}ms` }}>
-                          {Array.from({ length: 8 }).map((__, j) => (
+                          {Array.from({ length: 9 }).map((__, j) => (
                             <td key={j}><span className="skeleton-block" /></td>
                           ))}
                         </tr>
@@ -730,6 +1002,7 @@ function Dashboard({ username, onLogout }) {
                         <th>Price</th>
                         <th>Day change</th>
                         <th>Value</th>
+                        <th>% Portfolio</th>
                         <th>Unrealized P&amp;L</th>
                       </tr>
                     </thead>
@@ -755,6 +1028,9 @@ function Dashboard({ username, onLogout }) {
                             </span>
                           </td>
                           <td>{formatCurrency(holding.value)}</td>
+                          <td>
+                            {holding.pct_of_portfolio != null ? `${holding.pct_of_portfolio.toFixed(2)}%` : "—"}
+                          </td>
                           <td className={signClass(holding.unrealized_pnl)}>
                             <span className="cell-with-icon">
                               <TrendArrow value={holding.unrealized_pnl} />
@@ -769,27 +1045,8 @@ function Dashboard({ username, onLogout }) {
                 )}
               </div>
 
-              <form className="trade-form" onSubmit={handleTrade}>
-                <h3>Buy / Sell</h3>
-
-                <div className="trade-toggle" data-active={tradeType}>
-                  <span className="trade-toggle-pill" aria-hidden="true" />
-                  <button
-                    type="button"
-                    className={tradeType === "buy" ? "active" : ""}
-                    onClick={() => setTradeType("buy")}
-                  >
-                    Buy
-                  </button>
-                  <button
-                    type="button"
-                    className={tradeType === "sell" ? "active" : ""}
-                    onClick={() => setTradeType("sell")}
-                  >
-                    Sell
-                  </button>
-                </div>
-
+              <form className="trade-form" onSubmit={handleTickerLookupSubmit}>
+                <h3>Look up a stock</h3>
                 <div className="trade-fields">
                   <input
                     type="text"
@@ -807,25 +1064,11 @@ function Dashboard({ username, onLogout }) {
                       </option>
                     ))}
                   </datalist>
-
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="Amount"
-                    value={amount}
-                    onChange={handleAmountChange}
-                    required
-                  />
-
-                  <button type="submit" disabled={submitting || !isValidTicker || !(Number(amount) > 0)}>
-                    {submitting ? "Submitting..." : tradeType === "buy" ? "Buy" : "Sell"}
+                  <button type="submit" disabled={!ticker.trim()}>
+                    View
                   </button>
                 </div>
-
-                {ticker && !isValidTicker && (
-                  <p className="error">"{ticker}" isn't a recognized ticker</p>
-                )}
-                {tradeError && <p className="error">{tradeError}</p>}
+                {lookupError && <p className="error">{lookupError}</p>}
               </form>
             </section>
 
@@ -835,7 +1078,7 @@ function Dashboard({ username, onLogout }) {
                   <div className="modal-header">
                     <div>
                       <h3>{historyTicker}</h3>
-                      <p>{tickerLookup.get(historyTicker)}</p>
+                      <p>{quote?.company_name ?? tickerLookup.get(historyTicker) ?? "—"}</p>
                     </div>
                     <button type="button" className="modal-close" onClick={closeHistory} aria-label="Close">
                       &times;
@@ -843,6 +1086,32 @@ function Dashboard({ username, onLogout }) {
                   </div>
 
                   <div className="modal-body">
+                    {quoteLoading && (
+                      <p className="quote-line">
+                        <span className="skeleton-block" style={{ width: "140px", height: "22px" }} />
+                      </p>
+                    )}
+
+                    {!quoteLoading && quoteError && (
+                      <p className="error quote-line">Couldn't load a quote for {historyTicker}.</p>
+                    )}
+
+                    {!quoteLoading && !quoteError && quote && quote.current_price != null && (
+                      <p className={`summary-value quote-line ${signClass(quote.day_change)}`}>
+                        {formatCurrency(quote.current_price)}
+                        <TrendArrow value={quote.day_change} />
+                        <span className="summary-sub">
+                          {formatCurrency(quote.day_change)} ({formatPercent(quote.day_change_pct)})
+                        </span>
+                      </p>
+                    )}
+
+                    {!quoteLoading && !quoteError && quote && quote.current_price == null && (
+                      <p className="error quote-line">
+                        Live price unavailable for {historyTicker} right now — trading is disabled.
+                      </p>
+                    )}
+
                     {historyPerformanceLoading && (
                       <div className="history-chart-skeleton" aria-label="Loading price history">
                         <span className="skeleton-block" style={{ width: "100%", height: "100%" }} />
@@ -894,6 +1163,55 @@ function Dashboard({ username, onLogout }) {
                       </div>
                     )}
 
+                    <form className="trade-form" onSubmit={handleTrade}>
+                      <div className="trade-toggle" data-active={tradeType}>
+                        <span className="trade-toggle-pill" aria-hidden="true" />
+                        <button
+                          type="button"
+                          className={tradeType === "buy" ? "active" : ""}
+                          onClick={() => setTradeType("buy")}
+                        >
+                          Buy
+                        </button>
+                        <button
+                          type="button"
+                          className={tradeType === "sell" ? "active" : ""}
+                          disabled={!ownedHolding || Number(ownedHolding.amount) <= 0}
+                          onClick={() => setTradeType("sell")}
+                        >
+                          Sell
+                        </button>
+                      </div>
+
+                      <div className="trade-fields">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Shares"
+                          value={amount}
+                          onChange={handleAmountChange}
+                          required
+                        />
+                        <button type="submit" disabled={submitting || !quote?.current_price || !(Number(amount) > 0)}>
+                          {submitting ? "Submitting..." : tradeType === "buy" ? "Buy" : "Sell"}
+                        </button>
+                      </div>
+
+                      <p className="quote-estimate">
+                        {Number(amount) > 0 && quote?.current_price != null
+                          ? `Estimated ${tradeType === "buy" ? "cost" : "proceeds"}: ${formatCurrency(Number(amount) * quote.current_price)}`
+                          : "Enter a share amount to see the estimated total"}
+                      </p>
+
+                      {ownedHolding && (
+                        <p className="owned-line">
+                          You own {Number(ownedHolding.amount)} shares · avg cost {formatCurrency(ownedHolding.avg_cost)}
+                        </p>
+                      )}
+
+                      {tradeError && <p className="error">{tradeError}</p>}
+                    </form>
+
                     {historyLoading && <p>Loading...</p>}
                     {historyError && <p className="error">Failed to load history: {historyError}</p>}
 
@@ -926,6 +1244,152 @@ function Dashboard({ username, onLogout }) {
                               </tr>
                             );
                           })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showRealizedModal && (
+              <div className={`modal-overlay ${realizedModalClosing ? "closing" : ""}`} onClick={closeRealizedModal}>
+                <div className="modal-panel wide" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <div>
+                      <h3>Realized P&amp;L</h3>
+                      <p>Profit or loss you've locked in by selling</p>
+                    </div>
+                    <button type="button" className="modal-close" onClick={closeRealizedModal} aria-label="Close">
+                      &times;
+                    </button>
+                  </div>
+
+                  <div className="modal-body">
+                    {realizedLots.length === 0 && <p>No realized gains or losses yet — sell a position to see it here.</p>}
+
+                    {realizedLots.length > 0 && (
+                      <div className="table-wrapper">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Date sold</th>
+                              <th>Ticker</th>
+                              <th>Shares</th>
+                              <th>Avg cost</th>
+                              <th>Sale price</th>
+                              <th>Realized P&amp;L</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {realizedLots.map((lot, i) => (
+                              <tr key={`${lot.ticker}-${lot.date}-${i}`}>
+                                <td>{formatDate(lot.date)}</td>
+                                <td><span className="ticker-badge">{lot.ticker}</span></td>
+                                <td>{lot.shares}</td>
+                                <td>{formatCurrency(lot.avg_cost)}</td>
+                                <td>{formatCurrency(lot.sale_price)}</td>
+                                <td className={signClass(lot.pnl)}>
+                                  <span className="cell-with-icon">
+                                    <TrendArrow value={lot.pnl} />
+                                    {formatCurrency(lot.pnl)}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showCashModal && (
+              <div className={`modal-overlay ${cashModalClosing ? "closing" : ""}`} onClick={closeCashModal}>
+                <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <div>
+                      <h3>Cash</h3>
+                      <p>Deposit or withdraw, and see your history</p>
+                    </div>
+                    <button type="button" className="modal-close" onClick={closeCashModal} aria-label="Close">
+                      &times;
+                    </button>
+                  </div>
+
+                  <div className="modal-body">
+                    <p className="summary-value quote-line">
+                      {formatCurrency(summary?.cash_balance)}
+                      <span className="summary-sub">available</span>
+                    </p>
+
+                    <form className="trade-form" onSubmit={handleFundSubmit}>
+                      <div className="trade-toggle" data-active={fundType}>
+                        <span className="trade-toggle-pill" aria-hidden="true" />
+                        <button
+                          type="button"
+                          className={fundType === "deposit" ? "active" : ""}
+                          onClick={() => setFundType("deposit")}
+                        >
+                          Deposit
+                        </button>
+                        <button
+                          type="button"
+                          className={fundType === "withdraw" ? "active" : ""}
+                          onClick={() => setFundType("withdraw")}
+                        >
+                          Withdraw
+                        </button>
+                      </div>
+
+                      <div className="trade-fields">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Amount"
+                          value={formatAmountForDisplay(fundAmount)}
+                          onChange={makeAmountChangeHandler(setFundAmount, setFundError)}
+                          required
+                        />
+                        <button type="submit" disabled={fundSubmitting || !(Number(fundAmount) > 0)}>
+                          {fundSubmitting ? "Submitting..." : fundType === "deposit" ? "Deposit" : "Withdraw"}
+                        </button>
+                      </div>
+
+                      {fundError && <p className="error">{fundError}</p>}
+                    </form>
+
+                    {cashTransactionsLoading && <p>Loading...</p>}
+                    {cashTransactionsError && <p className="error">Failed to load history: {cashTransactionsError}</p>}
+
+                    {!cashTransactionsLoading && !cashTransactionsError && cashTransactions.length === 0 && (
+                      <p>No deposits or withdrawals yet.</p>
+                    )}
+
+                    {!cashTransactionsLoading && !cashTransactionsError && cashTransactions.length > 0 && (
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...cashTransactions]
+                            .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date) || b.tr_id - a.tr_id)
+                            .map((tx) => {
+                              const isDeposit = tx.type === "deposit";
+                              return (
+                                <tr key={tx.tr_id}>
+                                  <td>{formatDate(tx.transaction_date)}</td>
+                                  <td className={isDeposit ? "positive" : "negative"}>{isDeposit ? "Deposit" : "Withdraw"}</td>
+                                  <td>{formatCurrency(Math.abs(Number(tx.amount)))}</td>
+                                </tr>
+                              );
+                            })}
                         </tbody>
                       </table>
                     )}

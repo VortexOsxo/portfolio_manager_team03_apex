@@ -275,6 +275,15 @@
     box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
   }
 
+  .summary-card.clickable {
+    cursor: pointer;
+  }
+
+  .summary-card.clickable:focus-visible {
+    outline: 2px solid var(--accent-start);
+    outline-offset: 3px;
+  }
+
   .summary-card p {
     margin: 0;
   }
@@ -439,6 +448,10 @@
     animation: panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
+  .modal-panel.wide {
+    max-width: 720px;
+  }
+
   .modal-overlay.closing .modal-panel {
     animation: panel-out 0.18s ease both;
   }
@@ -484,6 +497,7 @@
     color: var(--text-muted);
     font-size: 0.9rem;
   }
+
 
   .modal-close {
     padding: 4px 10px;
@@ -602,7 +616,8 @@
     transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .trade-toggle[data-active="sell"] .trade-toggle-pill {
+  .trade-toggle[data-active="sell"] .trade-toggle-pill,
+  .trade-toggle[data-active="withdraw"] .trade-toggle-pill {
     transform: translateX(100%);
   }
 
@@ -669,6 +684,18 @@
   .trade-fields button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .quote-line {
+    margin-bottom: 18px;
+  }
+
+  .quote-estimate,
+  .owned-line {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-muted);
   }
 
   .performance-view {

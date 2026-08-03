@@ -3,7 +3,7 @@ from decimal import Decimal
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
-from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_user, create_user
+from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_user, create_user, get_transactions
 from werkzeug.security import check_password_hash, generate_password_hash
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
@@ -48,6 +48,22 @@ def get_balance():
     account_id = int(get_jwt_identity())
     balance = get_account_balance(account_id)
     return jsonify({"account_id": account_id, "balance": float(balance)}), 200
+
+
+@accounts_bp.get("/transactions")
+@jwt_required()
+def get_cash_transactions_route():
+    account_id = int(get_jwt_identity())
+    transactions = get_transactions(account_id, include_cash_transactions=True)
+    cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
+    return jsonify(cash_transactions), 200
+
+
+@accounts_bp.get("/transactions")
+def get_cash_transactions_route():
+    transactions = get_transactions(include_cash_transactions=True)
+    cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
+    return jsonify(cash_transactions), 200
 
 
 @accounts_bp.post("/deposit")

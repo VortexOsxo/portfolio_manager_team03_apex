@@ -22,11 +22,17 @@ def search_stocks_route():
     return jsonify(search_stocks(query)), 200
 
 
-def _build_holdings(account_id):
-    """Group transactions by ticker and enrich with live price and P&L.
+@stocks_bp.get("/quote/<string:ticker>")
+def get_quote(ticker):
+    """Live price + company name for any ticker, owned or not. """
+    info = YahooFinanceStock(ticker.upper()).get_info()
+    if info["company_name"] is None:
+        return jsonify({"error": f'No quote found for "{ticker}"'}), 404
+    return jsonify(info), 200
 
-    Returns (holdings, realized_pnl_by_ticker).
-    """
+
+def _build_holdings(account_id):
+    """Group transactions by ticker"""
     transactions = get_transactions(account_id)
 
     amounts = {}
@@ -64,6 +70,14 @@ def _build_holdings(account_id):
             'day_change_pct': change["pct"],
         }
 
+    total_holdings_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
+    for h in holdings.values():
+        h['pct_of_portfolio'] = (
+            round(h['value'] / total_holdings_value * 100, 2)
+            if h['value'] is not None and total_holdings_value
+            else None
+        )
+
     return holdings, realized
 
 
@@ -92,6 +106,11 @@ def get_summary():
         h['day_change'] for h in holdings.values() if h['day_change'] is not None
     )
     total_realized_pnl = sum(realized.values())
+    realized_lots = sorted(
+        performance.compute_realized_lots(get_transactions()),
+        key=lambda lot: lot['date'],
+        reverse=True,
+    )
 
     cash_balance = get_account_balance(account_id)
     net_worth = total_value + float(cash_balance)
@@ -108,6 +127,8 @@ def get_summary():
         'total_day_change': round(total_day_change, 2),
         'total_day_change_pct': total_day_change_pct,
         'total_realized_pnl': round(total_realized_pnl, 2),
+        'realized_pnl_by_ticker': realized,
+        'realized_lots': realized_lots,
         'cash_balance': round(float(cash_balance), 2),
         'net_worth': round(net_worth, 2),
     }), 200

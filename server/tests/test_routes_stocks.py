@@ -144,9 +144,11 @@ class TestPerformanceRoute:
         assert response.status_code == 400
         assert "required" in response.get_json()["error"]
 
+    @patch("flaskr.services.database.get_account_balance")
     @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
     @patch("flaskr.services.database.get_transactions")
-    def test_returns_dates_and_performances(self, mock_get_transactions, mock_get_daily_values, client):
+    def test_returns_dates_and_performances(self, mock_get_transactions, mock_get_daily_values, mock_get_account_balance, client):
+        mock_get_account_balance.return_value = Decimal("30000.00")
         mock_get_transactions.return_value = [
             {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 2, "cost_basis": 100.0, "transaction_date": "2026-01-02"},
         ]
@@ -162,11 +164,13 @@ class TestPerformanceRoute:
         assert response.get_json()["equity"] == [200.0]
         assert "cash" in response.get_json()
 
+    @patch("flaskr.services.database.get_account_balance")
     @patch("flaskr.services.database.get_transactions")
-    def test_malformed_date_returns_500_with_a_json_error(self, mock_get_transactions, client):
+    def test_malformed_date_returns_500_with_a_json_error(self, mock_get_transactions, mock_get_account_balance, client):
         # No date-format validation before the string reaches
         # datetime.strptime deep inside YahooFinanceStock -- it raises, and
         # the route's blanket except turns it into a 500 (not a 400).
+        mock_get_account_balance.return_value = Decimal("30000.00")
         mock_get_transactions.return_value = [
             {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 2, "cost_basis": 100.0, "transaction_date": "2026-01-02"},
         ]

@@ -14,9 +14,11 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
     def tearDown(self):
         database._PERFORMANCE_CACHE.clear()
 
+    @patch("flaskr.services.database.get_account_balance")
     @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
     @patch("flaskr.services.database.get_transactions")
-    def test_reuses_a_cached_range(self, get_transactions, get_daily_values):
+    def test_reuses_a_cached_range(self, get_transactions, get_daily_values, get_account_balance):
+        get_account_balance.return_value = Decimal("30000.00")
         get_transactions.return_value = [
             {
                 "tr_id": 1,
@@ -94,9 +96,11 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
             (ACCOUNT_ID, "AAPL", Decimal("-1"), 100, "2026-01-02"),
         )
 
+    @patch("flaskr.services.database.get_account_balance")
     @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
     @patch("flaskr.services.database.get_transactions")
-    def test_expired_cache_entry_is_refetched(self, get_transactions, get_daily_values):
+    def test_expired_cache_entry_is_refetched(self, get_transactions, get_daily_values, get_account_balance):
+        get_account_balance.return_value = Decimal("30000.00")
         get_transactions.return_value = [
             {
                 "tr_id": 1,
@@ -122,6 +126,40 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         )
 
         database.get_portfolio_performance(ACCOUNT_ID, "2026-01-01", "2026-01-05")
+
+    @patch("flaskr.services.database.get_account_balance")
+    @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
+    @patch("flaskr.services.database.get_transactions")
+    def test_cash_anchor_ignores_requested_end_date(self, get_transactions, get_daily_values, get_account_balance):
+        get_account_balance.return_value = Decimal("1000.00")
+
+        equity_tx = [
+            {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 1, "cost_basis": 100.0, "transaction_date": "2026-01-02"},
+        ]
+        all_tx = equity_tx + [
+            {"tr_id": 2, "type": "deposit", "ticker": None, "amount": 5000.0, "cost_basis": None, "transaction_date": "2026-01-05"},
+        ]
+        get_transactions.side_effect = (
+            lambda *a, include_cash_transactions=False, **k: all_tx if include_cash_transactions else equity_tx
+        )
+
+        all_daily_values = {
+            "AAPL": {"2026-01-02": 100, "2026-01-05": 100},
+            "^GSPC": {"2026-01-02": 1, "2026-01-05": 1},
+        }
+        get_daily_values.side_effect = lambda tickers, start_date, end_date: {
+            ticker: {d: p for d, p in prices.items() if start_date <= d <= end_date}
+            for ticker, prices in all_daily_values.items()
+        }
+
+        # A deposit lands on 2026-01-05 -- after the narrow range's end_date
+        # but within the wide range. It must not shift the shared 01-02 value.
+        narrow_dates, _, narrow_cash = database.get_portfolio_performance("2026-01-01", "2026-01-02")
+        wide_dates, _, wide_cash = database.get_portfolio_performance("2026-01-01", "2026-01-05")
+
+        self.assertEqual(narrow_dates, ["2026-01-02"])
+        self.assertEqual(wide_dates, ["2026-01-02", "2026-01-05"])
+        self.assertEqual(narrow_cash[0], wide_cash[0])
 
         self.assertEqual(get_transactions.call_count, 4)
         self.assertEqual(get_daily_values.call_count, 2)
