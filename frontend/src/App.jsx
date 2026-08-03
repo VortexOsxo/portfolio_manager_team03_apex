@@ -633,7 +633,7 @@ function Dashboard({ username, onLogout }) {
     setFundError(null);
     setFundSubmitting(true);
 
-    fetch(`/api/accounts/${fundType}`, {
+    authFetch(`/api/accounts/${fundType}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ amount: Number(fundAmount) }),
@@ -655,7 +655,7 @@ function Dashboard({ username, onLogout }) {
   const fetchHistoryTransactions = (tickerSymbol, requestId) => {
     setHistoryLoading(true);
     setHistoryError(null);
-    return fetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
+    return authFetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         return res.json();
@@ -760,44 +760,7 @@ function Dashboard({ username, onLogout }) {
   const fetchCashTransactions = () => {
     setCashTransactionsLoading(true);
     setCashTransactionsError(null);
-    return fetch(`/api/accounts/transactions`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-        return res.json();
-      })
-      .then((data) => setCashTransactions(data))
-      .catch((err) => setCashTransactionsError(err.message))
-      .finally(() => setCashTransactionsLoading(false));
-  };
-
-  const openCashModal = () => {
-    setShowCashModal(true);
-    setFundType("deposit");
-    setFundAmount("");
-    setFundError(null);
-    fetchCashTransactions();
-  };
-
-  const closeCashModal = () => {
-    setCashModalClosing(true);
-    setTimeout(() => {
-      setShowCashModal(false);
-      setCashModalClosing(false);
-    }, 180);
-  };
-
-  const closeRealizedModal = () => {
-    setRealizedModalClosing(true);
-    setTimeout(() => {
-      setShowRealizedModal(false);
-      setRealizedModalClosing(false);
-    }, 180);
-  };
-
-  const fetchCashTransactions = () => {
-    setCashTransactionsLoading(true);
-    setCashTransactionsError(null);
-    return fetch(`/api/accounts/transactions`)
+    return authFetch(`/api/accounts/transactions`)
       .then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         return res.json();

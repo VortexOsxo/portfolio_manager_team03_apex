@@ -59,13 +59,6 @@ def get_cash_transactions_route():
     return jsonify(cash_transactions), 200
 
 
-@accounts_bp.get("/transactions")
-def get_cash_transactions_route():
-    transactions = get_transactions(include_cash_transactions=True)
-    cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
-    return jsonify(cash_transactions), 200
-
-
 @accounts_bp.post("/deposit")
 @jwt_required()
 def deposit():
@@ -75,7 +68,7 @@ def deposit():
     if error:
         return jsonify({"error": error}), 400
 
-    deposit_cash(amount)
+    deposit_cash(account_id, amount)
     balance = get_account_balance(account_id)
     return jsonify({"account_id": account_id, "balance": float(balance)}), 201
 
@@ -90,7 +83,7 @@ def withdraw():
         return jsonify({"error": error}), 400
 
     try:
-        withdraw_cash(amount)
+        withdraw_cash(account_id, amount)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
