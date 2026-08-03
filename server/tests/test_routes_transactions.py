@@ -26,3 +26,12 @@ class TestGetTransactionsRoute:
         assert response.status_code == 200
         assert response.get_json()[0]["ticker"] == "AAPL"
         mock_get_transactions.assert_called_once_with("AAPL")
+
+    @patch("flaskr.blueprints.transactions_bp.get_transactions")
+    def test_db_failure_returns_500_with_json_error(self, mock_get_transactions, client):
+        mock_get_transactions.side_effect = Exception("db connection lost")
+
+        response = client.get("/transactions/")
+
+        assert response.status_code == 500
+        assert response.get_json() == {"error": "db connection lost"}

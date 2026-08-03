@@ -8,5 +8,8 @@ transactions_bp = Blueprint("transactions", __name__, url_prefix="/transactions"
 @transactions_bp.get("/")
 def get_transactions_route():
     ticker = request.args.get("ticker")
-    transactions = get_transactions(ticker)
+    try:
+        transactions = get_transactions(ticker)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     return jsonify(transactions), 200
