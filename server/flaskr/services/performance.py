@@ -1,8 +1,4 @@
-"""Portfolio performance calculations: unrealized P&L, realized P&L, day change.
-
-Pure functions - no DB or HTTP access. Callers pass in transaction rows and
-live market data they've already fetched.
-"""
+"""Portfolio performance calculations: unrealized P&L, realized P&L, day change."""
 
 
 def compute_positions(transactions):
@@ -51,10 +47,7 @@ def compute_positions(transactions):
 
 
 def compute_realized_lots(transactions):
-    """Same average-cost walk as compute_positions, but emits one record per
-    sell (with its date) instead of summing P&L per ticker - the shape a
-    "realized gains" history needs.
-    """
+    """Same walk as compute_positions, but emits one record per sell instead of a per-ticker total."""
     ordered = sorted(transactions, key=lambda tx: (tx['transaction_date'], tx.get('tr_id', 0)))
 
     shares_held = {}

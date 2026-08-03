@@ -306,11 +306,12 @@ function App() {
       .then((data) => {
         const dates = Array.isArray(data.dates) ? data.dates : [];
         const equity = Array.isArray(data.equity) ? data.equity : [];
+        const cash = Array.isArray(data.cash) ? data.cash : [];
         const chartData = dates
           .slice(0, equity.length)
           .map((date, index) => ({
             date,
-            value: Number(equity[index]),
+            value: Number(equity[index]) + Number(cash[index] ?? 0),
           }))
           .filter((point) => Number.isFinite(point.value));
         performanceCacheRef.current.set(cacheKey, { data: chartData, cachedAt: Date.now() });

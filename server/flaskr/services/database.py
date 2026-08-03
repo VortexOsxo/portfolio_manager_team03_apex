@@ -267,11 +267,19 @@ def get_portfolio_performance(start_date, end_date):
 
     equity_transactions = get_transactions()
     all_transactions = get_transactions(include_cash_transactions=True)
+    current_cash_balance = float(get_account_balance())
+
+    def _anchor_to_current_balance(balances):
+        # Corrects drift from starting capital that predates the transaction log.
+        if not balances:
+            return balances
+        offset = current_cash_balance - balances[-1]
+        return [round(value + offset, 2) for value in balances]
 
     tickers = performance.get_tickers_for_range(start_date, end_date, equity_transactions)
     if not tickers:
-        cash = performance.compute_cash_balances(
-            [], all_transactions
+        cash = _anchor_to_current_balance(
+            performance.compute_cash_balances([], all_transactions)
         )
         return [], [], cash
 
@@ -289,7 +297,7 @@ def get_portfolio_performance(start_date, end_date):
         for ticker in tickers
     }
     equity = performance.compute_portfolio_values(dates, equity_transactions, ticker_values)
-    cash = performance.compute_cash_balances(dates, all_transactions)
+    cash = _anchor_to_current_balance(performance.compute_cash_balances(dates, all_transactions))
 
     with _PERFORMANCE_CACHE_LOCK:
         _PERFORMANCE_CACHE[cache_key] = {

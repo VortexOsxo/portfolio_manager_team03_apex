@@ -12,9 +12,11 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
     def tearDown(self):
         database.clear_performance_cache()
 
+    @patch("flaskr.services.database.get_account_balance")
     @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
     @patch("flaskr.services.database.get_transactions")
-    def test_reuses_a_cached_range(self, get_transactions, get_daily_values):
+    def test_reuses_a_cached_range(self, get_transactions, get_daily_values, get_account_balance):
+        get_account_balance.return_value = Decimal("30000.00")
         get_transactions.return_value = [
             {
                 "tr_id": 1,
@@ -92,9 +94,11 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
             ("AAPL", Decimal("-1"), 100, "2026-01-02"),
         )
 
+    @patch("flaskr.services.database.get_account_balance")
     @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
     @patch("flaskr.services.database.get_transactions")
-    def test_expired_cache_entry_is_refetched(self, get_transactions, get_daily_values):
+    def test_expired_cache_entry_is_refetched(self, get_transactions, get_daily_values, get_account_balance):
+        get_account_balance.return_value = Decimal("30000.00")
         get_transactions.return_value = [
             {
                 "tr_id": 1,
