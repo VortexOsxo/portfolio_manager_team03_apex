@@ -99,6 +99,23 @@ def update_account_balance(amount, account_id=1, cursor=None):
         write_query(query, params)
 
 
+def get_cash_transactions():
+    query = "SELECT id, amount, transaction_date FROM cash_transactions ORDER BY transaction_date, id;"
+    return [
+        {'id': tr_id, 'amount': amount, 'transaction_date': transaction_date}
+        for tr_id, amount, transaction_date in read_query(query)
+    ]
+
+
+def record_cash_transaction(amount, transaction_date=None):
+    if transaction_date is None:
+        transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
+    write_query(
+        "INSERT INTO cash_transactions (amount, transaction_date) VALUES (%s, %s);",
+        (amount, transaction_date),
+    )
+
+
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(Decimal(str(amount)))
 

@@ -50,6 +50,45 @@ def compute_positions(transactions):
     return open_avg_cost, realized
 
 
+def compute_realized_lots(transactions):
+    """Same average-cost walk as compute_positions, but emits one record per
+    sell (with its date) instead of summing P&L per ticker - the shape a
+    "realized gains" history needs.
+    """
+    ordered = sorted(transactions, key=lambda tx: (tx['transaction_date'], tx.get('tr_id', 0)))
+
+    shares_held = {}
+    avg_cost = {}
+    lots = []
+
+    for tx in ordered:
+        ticker = tx['ticker']
+        amount = float(tx['amount'])
+        price = float(tx['cost_basis'])
+        held = shares_held.get(ticker, 0.0)
+        cost = avg_cost.get(ticker, 0.0)
+
+        if amount > 0:
+            held += amount
+            cost = (cost * (held - amount) + price * amount) / held
+        else:
+            sold = -amount
+            lots.append({
+                'ticker': ticker,
+                'date': tx['transaction_date'],
+                'shares': sold,
+                'avg_cost': round(cost, 4),
+                'sale_price': price,
+                'pnl': round((price - cost) * sold, 2),
+            })
+            held += amount
+
+        shares_held[ticker] = held
+        avg_cost[ticker] = cost
+
+    return lots
+
+
 def unrealized_pnl(amount_held, avg_cost, current_price):
     """Unrealized $ and % gain/loss on an open position."""
     if avg_cost is None or current_price is None or not amount_held:

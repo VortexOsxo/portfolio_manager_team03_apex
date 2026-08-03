@@ -18,4 +18,11 @@ CREATE TABLE `transactions` (
   PRIMARY KEY (`tr_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 
+CREATE TABLE `cash_transactions` (
+  `id` int AUTO_INCREMENT,
+  `amount` decimal(15,2) NOT NULL,
+  `transaction_date` datetime NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+
 INSERT INTO `accounts` (`balance`) VALUES (30000.00);

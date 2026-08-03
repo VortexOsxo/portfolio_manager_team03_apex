@@ -91,6 +91,66 @@ class TestComputePositions:
         assert realized == {}
 
 
+class TestComputeRealizedLots:
+    def test_no_sells_returns_empty(self):
+        transactions = [tx("AAPL", 10, 100, "2024-01-01", 1)]
+
+        assert performance.compute_realized_lots(transactions) == []
+
+    def test_partial_sell_emits_one_lot(self):
+        transactions = [
+            tx("AAPL", 10, 100, "2024-01-01", 1),
+            tx("AAPL", 10, 120, "2024-01-02", 2),
+            tx("AAPL", -5, 150, "2024-01-03", 3),
+        ]
+
+        lots = performance.compute_realized_lots(transactions)
+
+        assert lots == [
+            {
+                "ticker": "AAPL",
+                "date": "2024-01-03",
+                "shares": 5.0,
+                "avg_cost": 110.0,
+                "sale_price": 150.0,
+                "pnl": 200.0,
+            }
+        ]
+
+    def test_multiple_sells_emit_separate_lots_in_chronological_order(self):
+        transactions = [
+            tx("AAPL", 10, 100, "2024-01-01", 1),
+            tx("AAPL", -4, 150, "2024-01-02", 2),
+            tx("AAPL", -6, 90, "2024-01-03", 3),
+        ]
+
+        lots = performance.compute_realized_lots(transactions)
+
+        assert [lot["date"] for lot in lots] == ["2024-01-02", "2024-01-03"]
+        assert lots[0]["pnl"] == 200.0
+        assert lots[1]["pnl"] == -60.0
+
+    def test_out_of_order_input_is_sorted_before_processing(self):
+        transactions = [
+            tx("AAPL", -5, 150, "2024-01-03", 3),
+            tx("AAPL", 10, 120, "2024-01-02", 2),
+            tx("AAPL", 10, 100, "2024-01-01", 1),
+        ]
+
+        lots = performance.compute_realized_lots(transactions)
+
+        assert lots == [
+            {
+                "ticker": "AAPL",
+                "date": "2024-01-03",
+                "shares": 5.0,
+                "avg_cost": 110.0,
+                "sale_price": 150.0,
+                "pnl": 200.0,
+            }
+        ]
+
+
 class TestUnrealizedPnl:
     def test_gain(self):
         result = performance.unrealized_pnl(10, 100, 150)
