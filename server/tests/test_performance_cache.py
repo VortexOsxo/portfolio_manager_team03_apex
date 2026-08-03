@@ -4,13 +4,15 @@ from unittest.mock import MagicMock, patch
 
 from flaskr.services import database
 
+ACCOUNT_ID = 1
+
 
 class PortfolioPerformanceCacheTests(unittest.TestCase):
     def setUp(self):
-        database.clear_performance_cache()
+        database._PERFORMANCE_CACHE.clear()
 
     def tearDown(self):
-        database.clear_performance_cache()
+        database._PERFORMANCE_CACHE.clear()
 
     @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
     @patch("flaskr.services.database.get_transactions")
@@ -30,8 +32,8 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
             "^GSPC": {"2026-01-02": 1, "2026-01-05": 1},
         }
 
-        first_result = database.get_portfolio_performance("2026-01-01", "2026-01-05")
-        second_result = database.get_portfolio_performance("2026-01-01", "2026-01-05")
+        first_result = database.get_portfolio_performance(ACCOUNT_ID, "2026-01-01", "2026-01-05")
+        second_result = database.get_portfolio_performance(ACCOUNT_ID, "2026-01-01", "2026-01-05")
 
         dates, equity, cash = first_result
         self.assertEqual(dates, ["2026-01-02", "2026-01-05"])
@@ -51,20 +53,20 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         mock_cursor.fetchone.return_value = (Decimal("30000.00"),)
         get_db_connection.return_value.cursor.return_value = mock_cursor
 
-        database._PERFORMANCE_CACHE[("start", "end")] = {
+        database._PERFORMANCE_CACHE[(str(ACCOUNT_ID), "start", "end")] = {
             "created_at": 0,
             "dates": [],
             "equity": [],
             "cash": [],
         }
 
-        database.buy_holding("AAPL", 1, cost_basis=100, transaction_date="2026-01-02")
+        database.buy_holding(ACCOUNT_ID, "AAPL", 1, cost_basis=100, transaction_date="2026-01-02")
 
         self.assertEqual(database._PERFORMANCE_CACHE, {})
         mock_cursor.execute.assert_any_call(
-            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
-            "VALUES ('buy', %s, %s, %s, %s)",
-            ("AAPL", Decimal("1"), 100, "2026-01-02"),
+            "INSERT INTO transactions (account_id, type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES (%s, 'buy', %s, %s, %s, %s)",
+            (ACCOUNT_ID, "AAPL", Decimal("1"), 100, "2026-01-02"),
         )
 
     @patch("flaskr.services.database.get_holding_amount")
@@ -76,20 +78,20 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
         mock_cursor = MagicMock()
         get_db_connection.return_value.cursor.return_value = mock_cursor
 
-        database._PERFORMANCE_CACHE[("start", "end")] = {
+        database._PERFORMANCE_CACHE[(str(ACCOUNT_ID), "start", "end")] = {
             "created_at": 0,
             "dates": [],
             "equity": [],
             "cash": [],
         }
 
-        database.sell_holding("AAPL", 1, cost_basis=100, transaction_date="2026-01-02")
+        database.sell_holding(ACCOUNT_ID, "AAPL", 1, cost_basis=100, transaction_date="2026-01-02")
 
         self.assertEqual(database._PERFORMANCE_CACHE, {})
         mock_cursor.execute.assert_any_call(
-            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
-            "VALUES ('sell', %s, %s, %s, %s)",
-            ("AAPL", Decimal("-1"), 100, "2026-01-02"),
+            "INSERT INTO transactions (account_id, type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES (%s, 'sell', %s, %s, %s, %s)",
+            (ACCOUNT_ID, "AAPL", Decimal("-1"), 100, "2026-01-02"),
         )
 
     @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
@@ -110,19 +112,39 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
             "^GSPC": {"2026-01-02": 1, "2026-01-05": 1},
         }
 
-        database.get_portfolio_performance("2026-01-01", "2026-01-05")
+        database.get_portfolio_performance(ACCOUNT_ID, "2026-01-01", "2026-01-05")
 
         # Force the cached entry to look older than the TTL, rather than
         # sleeping 300+ seconds in the test.
-        cache_key = ("2026-01-01", "2026-01-05")
+        cache_key = (str(ACCOUNT_ID), "2026-01-01", "2026-01-05")
         database._PERFORMANCE_CACHE[cache_key]["created_at"] -= (
             database._PERFORMANCE_CACHE_TTL_SECONDS + 1
         )
 
-        database.get_portfolio_performance("2026-01-01", "2026-01-05")
+        database.get_portfolio_performance(ACCOUNT_ID, "2026-01-01", "2026-01-05")
 
         self.assertEqual(get_transactions.call_count, 4)
         self.assertEqual(get_daily_values.call_count, 2)
+
+    @patch("flaskr.services.database.YahooFinanceStock.get_daily_values_for_tickers")
+    @patch("flaskr.services.database.get_transactions")
+    def test_cache_is_scoped_per_account(self, get_transactions, get_daily_values):
+        # Account A's trade must not evict account B's cached entry.
+        get_transactions.return_value = []
+        get_daily_values.return_value = {}
+
+        other_account_id = 2
+        database._PERFORMANCE_CACHE[(str(other_account_id), "start", "end")] = {
+            "created_at": 0,
+            "dates": [],
+            "equity": [],
+            "cash": [],
+        }
+
+        database.clear_performance_cache(ACCOUNT_ID)
+
+        # Account B's entry must survive.
+        self.assertIn((str(other_account_id), "start", "end"), database._PERFORMANCE_CACHE)
 
 
 if __name__ == "__main__":

@@ -15,9 +15,11 @@ _PERFORMANCE_CACHE_TTL_SECONDS = 300
 _MARKET_TICKER = "^GSPC"
 
 
-def clear_performance_cache():
+def clear_performance_cache(account_id):
     with _PERFORMANCE_CACHE_LOCK:
-        _PERFORMANCE_CACHE.clear()
+        keys_to_delete = [k for k in _PERFORMANCE_CACHE if k[0] == str(account_id)]
+        for k in keys_to_delete:
+            del _PERFORMANCE_CACHE[k]
 
 def get_db_connection():
     return mysql.connector.connect(
@@ -149,7 +151,7 @@ def buy_holding(account_id, ticker, amount, cost_basis=None, transaction_date=No
         cursor.close()
         conn.close()
 
-    clear_performance_cache()
+    clear_performance_cache(account_id)
 
 
 def deposit_cash(account_id, amount, transaction_date=None):
@@ -174,7 +176,7 @@ def deposit_cash(account_id, amount, transaction_date=None):
         cursor.close()
         conn.close()
 
-    clear_performance_cache()
+    clear_performance_cache(account_id)
 
 
 def withdraw_cash(account_id, amount, transaction_date=None):
@@ -208,7 +210,7 @@ def withdraw_cash(account_id, amount, transaction_date=None):
         cursor.close()
         conn.close()
 
-    clear_performance_cache()
+    clear_performance_cache(account_id)
 
 
 def get_holding_amount(account_id, ticker, date=None):
@@ -250,7 +252,7 @@ def sell_holding(account_id, ticker, amount, cost_basis=None, transaction_date=N
         cursor.close()
         conn.close()
 
-    clear_performance_cache()
+    clear_performance_cache(account_id)
 
 def get_traded_tickers(account_id):
     query = "SELECT DISTINCT ticker FROM transactions WHERE account_id = %s AND type IN ('buy', 'sell');"
