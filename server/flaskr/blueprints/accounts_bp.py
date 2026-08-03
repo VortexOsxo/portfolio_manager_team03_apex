@@ -1,9 +1,8 @@
-from decimal import Decimal
-
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
 from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_user, create_user, get_transactions
+from flaskr.services.validation import parse_positive_amount
 from werkzeug.security import check_password_hash, generate_password_hash
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
@@ -14,7 +13,10 @@ MIN_PASSWORD_LENGTH = 8
 
 @accounts_bp.post("/signup")
 def signup():
-    body = request.get_json()
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"error": "Username and password required"}), 400
+
     username = body.get('username')
     password = body.get('password')
     if not username or not password:
@@ -35,7 +37,10 @@ def signup():
 
 @accounts_bp.post("/login")
 def login():
-    body = request.get_json()
+    body = request.get_json(silent=True)
+    if not body:
+        return jsonify({"error": "Username and password required"}), 400
+
     username = body.get('username')
     password = body.get('password')
     if not username or not password:
@@ -53,7 +58,10 @@ def login():
 @jwt_required()
 def get_balance():
     account_id = int(get_jwt_identity())
-    balance = get_account_balance(account_id)
+    try:
+        balance = get_account_balance(account_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify({"account_id": account_id, "balance": float(balance)}), 200
 
 
@@ -61,7 +69,10 @@ def get_balance():
 @jwt_required()
 def get_cash_transactions_route():
     account_id = int(get_jwt_identity())
-    transactions = get_transactions(account_id, include_cash_transactions=True)
+    try:
+        transactions = get_transactions(account_id, include_cash_transactions=True)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
     return jsonify(cash_transactions), 200
 
@@ -102,12 +113,4 @@ def _parse_amount(data):
     if not data or "amount" not in data:
         return None, "amount is required"
 
-    try:
-        amount = Decimal(str(data["amount"]))
-    except Exception:
-        return None, "amount must be a number"
-
-    if amount <= 0:
-        return None, "amount must be greater than zero"
-
-    return amount, None
+    return parse_positive_amount(data["amount"])
