@@ -305,12 +305,12 @@ function App() {
       })
       .then((data) => {
         const dates = Array.isArray(data.dates) ? data.dates : [];
-        const performances = Array.isArray(data.performances) ? data.performances : [];
+        const equity = Array.isArray(data.equity) ? data.equity : [];
         const chartData = dates
-          .slice(0, performances.length)
+          .slice(0, equity.length)
           .map((date, index) => ({
             date,
-            value: Number(performances[index]),
+            value: Number(equity[index]),
           }))
           .filter((point) => Number.isFinite(point.value));
         performanceCacheRef.current.set(cacheKey, { data: chartData, cachedAt: Date.now() });
@@ -527,13 +527,13 @@ function App() {
 
     const { startDate, endDate } = getPerformanceDates("3M");
     fetch(`/api/stocks/performance/${encodeURIComponent(tickerSymbol)}?start_date=${startDate}&end_date=${endDate}`)
-      .then((res) => (res.ok ? res.json() : { dates: [], performances: [] }))
+      .then((res) => (res.ok ? res.json() : { dates: [], equity: [] }))
       .then((data) => {
         const dates = Array.isArray(data.dates) ? data.dates : [];
-        const performances = Array.isArray(data.performances) ? data.performances : [];
+        const equity = Array.isArray(data.equity) ? data.equity : [];
         const chartData = dates
-          .slice(0, performances.length)
-          .map((date, index) => ({ date, value: Number(performances[index]) }))
+          .slice(0, equity.length)
+          .map((date, index) => ({ date, value: Number(equity[index]) }))
           .filter((point) => Number.isFinite(point.value));
         setHistoryPerformance(chartData);
       })
@@ -1131,15 +1131,14 @@ function App() {
                         </thead>
                         <tbody>
                           {[...cashTransactions]
-                            .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date) || b.id - a.id)
+                            .sort((a, b) => new Date(b.transaction_date) - new Date(a.transaction_date) || b.tr_id - a.tr_id)
                             .map((tx) => {
-                              const amountNum = Number(tx.amount);
-                              const isDeposit = amountNum > 0;
+                              const isDeposit = tx.type === "deposit";
                               return (
-                                <tr key={tx.id}>
+                                <tr key={tx.tr_id}>
                                   <td>{formatDate(tx.transaction_date)}</td>
                                   <td className={isDeposit ? "positive" : "negative"}>{isDeposit ? "Deposit" : "Withdraw"}</td>
-                                  <td>{formatCurrency(Math.abs(amountNum))}</td>
+                                  <td>{formatCurrency(Math.abs(Number(tx.amount)))}</td>
                                 </tr>
                               );
                             })}

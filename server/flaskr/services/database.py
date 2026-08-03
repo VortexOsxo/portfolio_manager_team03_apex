@@ -45,12 +45,16 @@ def read_query(query, params=None):
     conn.close()
     return result
 
-def get_transactions(ticker = None, start_date = None, end_date = None):
+def get_transactions(ticker=None, start_date=None, end_date=None, include_cash_transactions=False):
     query = (
-        "SELECT tr_id, ticker, amount, cost_basis, transaction_date "
+        "SELECT tr_id, type, ticker, amount, cost_basis, transaction_date "
         "FROM transactions WHERE 1=1"
     )
     params = ()
+
+    if not include_cash_transactions:
+        query += " AND type IN ('buy', 'sell')"
+
     if ticker:
         query += " AND ticker = %s"
         params += (ticker,)
@@ -65,12 +69,13 @@ def get_transactions(ticker = None, start_date = None, end_date = None):
     return [
         {
             'tr_id': tr_id,
+            'type': tx_type,
             'ticker': tx_ticker,
             'amount': amount,
             'cost_basis': cost_basis,
             'transaction_date': transaction_date,
         }
-        for tr_id, tx_ticker, amount, cost_basis, transaction_date in read_query(query, params)
+        for tr_id, tx_type, tx_ticker, amount, cost_basis, transaction_date in read_query(query, params)
     ]
 
 
@@ -97,23 +102,6 @@ def update_account_balance(amount, account_id=1, cursor=None):
         cursor.execute(query, params)
     else:
         write_query(query, params)
-
-
-def get_cash_transactions():
-    query = "SELECT id, amount, transaction_date FROM cash_transactions ORDER BY transaction_date, id;"
-    return [
-        {'id': tr_id, 'amount': amount, 'transaction_date': transaction_date}
-        for tr_id, amount, transaction_date in read_query(query)
-    ]
-
-
-def record_cash_transaction(amount, transaction_date=None):
-    if transaction_date is None:
-        transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
-    write_query(
-        "INSERT INTO cash_transactions (amount, transaction_date) VALUES (%s, %s);",
-        (amount, transaction_date),
-    )
 
 
 def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
@@ -148,7 +136,8 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
             )
 
         cursor.execute(
-            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES ('buy', %s, %s, %s, %s)",
             (ticker, amount, cost_basis, transaction_date)
         )
         update_account_balance(-total_cost, account_id=1, cursor=cursor)
@@ -161,6 +150,66 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
         conn.close()
 
     clear_performance_cache()
+
+
+def deposit_cash(amount, transaction_date=None):
+    amount = abs(Decimal(str(amount)))
+    if transaction_date is None:
+        transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES ('deposit', NULL, %s, NULL, %s)",
+            (amount, transaction_date),
+        )
+        update_account_balance(amount, account_id=1, cursor=cursor)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+    clear_performance_cache()
+
+
+def withdraw_cash(amount, transaction_date=None):
+    amount = abs(Decimal(str(amount)))
+    if transaction_date is None:
+        transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (1,))
+        row = cursor.fetchone()
+        cash_balance = Decimal(str(row[0] or 0))
+        if amount > cash_balance:
+            raise ValueError(
+                f"Insufficient funds: withdrawal of {amount:.2f} exceeds "
+                f"available balance of {cash_balance:.2f}"
+            )
+
+        cursor.execute(
+            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES ('withdrawal', NULL, %s, NULL, %s)",
+            (amount, transaction_date),
+        )
+        update_account_balance(-amount, account_id=1, cursor=cursor)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+    clear_performance_cache()
+
 
 def get_holding_amount(ticker, date=None):
     query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s" +\
@@ -188,7 +237,8 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO transactions (ticker, amount, cost_basis, transaction_date) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES ('sell', %s, %s, %s, %s)",
             (ticker, -amount, cost_basis, transaction_date)
         )
         update_account_balance(total_proceeds, account_id=1, cursor=cursor)
@@ -203,7 +253,7 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     clear_performance_cache()
 
 def get_traded_tickers():
-    query = "SELECT DISTINCT ticker FROM transactions;"
+    query = "SELECT DISTINCT ticker FROM transactions WHERE type IN ('buy', 'sell');"
     result = read_query(query)
     return [row[0] for row in result]
 
@@ -213,12 +263,17 @@ def get_portfolio_performance(start_date, end_date):
     with _PERFORMANCE_CACHE_LOCK:
         cached = _PERFORMANCE_CACHE.get(cache_key)
         if cached is not None and now - cached["created_at"] < _PERFORMANCE_CACHE_TTL_SECONDS:
-            return list(cached["dates"]), list(cached["performances"])
+            return list(cached["dates"]), list(cached["equity"]), list(cached["cash"])
 
-    transactions = get_transactions()
-    tickers = performance.get_tickers_for_range(start_date, end_date, transactions)
+    equity_transactions = get_transactions()
+    all_transactions = get_transactions(include_cash_transactions=True)
+
+    tickers = performance.get_tickers_for_range(start_date, end_date, equity_transactions)
     if not tickers:
-        return [], []
+        cash = performance.compute_cash_balances(
+            [], all_transactions
+        )
+        return [], [], cash
 
     all_values = YahooFinanceStock.get_daily_values_for_tickers(
         [*tickers, _MARKET_TICKER],
@@ -227,31 +282,33 @@ def get_portfolio_performance(start_date, end_date):
     )
     dates = list(all_values.get(_MARKET_TICKER, {}).keys())
     if not dates:
-        return [], []
+        return [], [], []
 
     ticker_values = {
         ticker: all_values.get(ticker, {})
         for ticker in tickers
     }
-    performances = performance.compute_portfolio_values(dates, transactions, ticker_values)
+    equity = performance.compute_portfolio_values(dates, equity_transactions, ticker_values)
+    cash = performance.compute_cash_balances(dates, all_transactions)
 
     with _PERFORMANCE_CACHE_LOCK:
         _PERFORMANCE_CACHE[cache_key] = {
             "created_at": time.monotonic(),
             "dates": list(dates),
-            "performances": list(performances),
+            "equity": list(equity),
+            "cash": list(cash),
         }
 
-    return dates, performances
+    return dates, equity, cash
 
 def get_stock_performance(ticker, start_date, end_date):
     market_dates = YahooFinanceStock.get_market_trading_days(start_date, end_date)
     ticker_values = YahooFinanceStock(ticker).get_daily_values(start_date, end_date)
 
-    stock_dates, performances = [], []
+    stock_dates, equity = [], []
     for date in market_dates:
         if date not in ticker_values:
             continue
         stock_dates.append(date)
-        performances.append(ticker_values[date])
-    return stock_dates, performances
+        equity.append(ticker_values[date])
+    return stock_dates, equity

@@ -1,11 +1,18 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from flask import Blueprint, jsonify, request
 import mysql
 
-from flaskr.services.database import get_stock_performance, get_transactions, buy_holding, sell_holding, get_portfolio_performance, get_account_balance
+from flaskr.services.database import (
+    get_stock_performance, get_transactions, buy_holding, sell_holding,
+    get_portfolio_performance, get_account_balance, deposit_cash, withdraw_cash,
+)
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 
 stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
+
+_MAX_INFO_WORKERS = 10
 
 
 @stocks_bp.get("/search")
@@ -31,15 +38,18 @@ def _build_holdings():
     for tx in transactions:
         ticker = tx['ticker']
         amounts[ticker] = amounts.get(ticker, 0) + float(tx['amount'])
+    amounts = {ticker: amount for ticker, amount in amounts.items() if amount != 0}
 
     avg_costs, realized = performance.compute_positions(transactions)
 
+    # get_info() has no batch equivalent, so fetch each held ticker's quote concurrently instead of one network round trip
+    tickers = list(amounts.keys())
+    with ThreadPoolExecutor(max_workers=min(len(tickers), _MAX_INFO_WORKERS) or 1) as executor:
+        infos = dict(zip(tickers, executor.map(lambda t: YahooFinanceStock(t).get_info(), tickers)))
+
     holdings = {}
     for ticker, amount in amounts.items():
-        if amount == 0:
-            continue
-
-        info = YahooFinanceStock(ticker).get_info()
+        info = infos[ticker]
         current_price = info["current_price"]
         avg_cost = avg_costs.get(ticker)
 
@@ -128,11 +138,11 @@ def get_performance():
         return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
     try:
-        dates, performances = get_portfolio_performance(start_date, end_date)
+        dates, equity, cash = get_portfolio_performance(start_date, end_date)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-    return jsonify({"dates": dates, "performances": performances}), 200
+    return jsonify({"dates": dates, "equity": equity, "cash": cash}), 200
 
 @stocks_bp.get("/performance/<string:ticker>")
 def get_stock_performance_route(ticker):
@@ -145,12 +155,12 @@ def get_stock_performance_route(ticker):
             return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
         try:
-            dates, performances = get_stock_performance(ticker, start_date, end_date)
+            dates, equity = get_stock_performance(ticker, start_date, end_date)
         except Exception as e:
             print(e)
             return jsonify({"error": str(e)}), 500
 
-        return jsonify({"dates": dates, "performances": performances}), 200
+        return jsonify({"dates": dates, "equity": equity}), 200
     except Exception as e:
         print(f"Error occurred: {e}")
         return "", 400

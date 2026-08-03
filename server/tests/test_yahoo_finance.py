@@ -97,6 +97,69 @@ class TestGetPriceOnDate:
         assert price is None
 
 
+class TestGetDailyValues:
+    @patch("flaskr.yahoo_finance.yf.Ticker")
+    def test_returns_date_price_map_for_trading_days(self, mock_ticker_cls):
+        index = pd.to_datetime(["2026-01-02", "2026-01-05"])
+        mock_ticker_cls.return_value.history.return_value = pd.DataFrame(
+            {"Close": [100.0, 105.0]}, index=index
+        )
+
+        values = YahooFinanceStock("AAPL").get_daily_values("2026-01-01", "2026-01-05")
+
+        assert values == {"2026-01-02": 100.0, "2026-01-05": 105.0}
+
+    @patch("flaskr.yahoo_finance.yf.Ticker")
+    def test_returns_empty_dict_when_history_is_empty(self, mock_ticker_cls):
+        # Covers both "empty date range" and "unknown ticker" -- yfinance
+        # surfaces both the same way, as an empty history DataFrame.
+        mock_ticker_cls.return_value.history.return_value = pd.DataFrame({"Close": []})
+
+        values = YahooFinanceStock("NOTATICKER").get_daily_values("2026-01-01", "2026-01-05")
+
+        assert values == {}
+
+
+class TestGetMarketTradingDays:
+    @patch("flaskr.yahoo_finance.yf.Ticker")
+    def test_returns_trading_days_as_strings(self, mock_ticker_cls):
+        index = pd.to_datetime(["2026-01-02", "2026-01-05", "2026-01-06"])
+        mock_ticker_cls.return_value.history.return_value = pd.DataFrame(
+            {"Close": [1.0, 2.0, 3.0]}, index=index
+        )
+
+        days = YahooFinanceStock.get_market_trading_days("2026-01-01", "2026-01-06")
+
+        assert days == ["2026-01-02", "2026-01-05", "2026-01-06"]
+        mock_ticker_cls.assert_called_once_with("^GSPC")
+
+    @patch("flaskr.yahoo_finance.yf.Ticker")
+    def test_returns_empty_list_for_a_weekend_only_range(self, mock_ticker_cls):
+        # An empty history from yfinance still carries a DatetimeIndex (just
+        # empty), not a plain RangeIndex -- match that shape here.
+        mock_ticker_cls.return_value.history.return_value = pd.DataFrame(
+            {"Close": []}, index=pd.DatetimeIndex([])
+        )
+
+        days = YahooFinanceStock.get_market_trading_days("2026-01-03", "2026-01-04")  # Sat/Sun
+
+        assert days == []
+
+    @patch("flaskr.yahoo_finance.yf.Ticker")
+    def test_does_not_validate_start_is_before_end(self, mock_ticker_cls):
+        # Characterizes current behavior: a reversed range is passed straight
+        # through to yfinance with no swap or rejection.
+        mock_ticker_cls.return_value.history.return_value = pd.DataFrame(
+            {"Close": []}, index=pd.DatetimeIndex([])
+        )
+
+        YahooFinanceStock.get_market_trading_days("2026-01-10", "2026-01-01")
+
+        called = mock_ticker_cls.return_value.history.call_args.kwargs
+        assert called["start"] == datetime(2026, 1, 10)
+        assert called["end"] == datetime(2026, 1, 2)
+
+
 class TestGetDailyValuesForTickers:
     @patch("flaskr.yahoo_finance.yf.download")
     def test_fetches_multiple_tickers_in_one_download(self, download):
@@ -122,6 +185,36 @@ class TestGetDailyValuesForTickers:
             "MSFT": {"2026-01-02": 200.0, "2026-01-05": 210.0},
         }
         download.assert_called_once()
+
+    @patch("flaskr.yahoo_finance.yf.download")
+    def test_single_ticker_flat_columns_are_handled(self, download):
+        # yfinance often returns flat (non-MultiIndex) columns when only one
+        # ticker is requested -- this exercises the fallback branch that
+        # doesn't index by ticker at all.
+        index = pd.to_datetime(["2026-01-02", "2026-01-05"])
+        download.return_value = pd.DataFrame(
+            {
+                "Open": [99.0, 104.0],
+                "High": [101.0, 106.0],
+                "Low": [98.0, 103.0],
+                "Close": [100.0, 105.0],
+                "Volume": [1000, 1100],
+            },
+            index=index,
+        )
+
+        result = YahooFinanceStock.get_daily_values_for_tickers(["AAPL"], "2026-01-01", "2026-01-05")
+
+        assert result == {"AAPL": {"2026-01-02": 100.0, "2026-01-05": 105.0}}
+
+    @patch("flaskr.yahoo_finance.yf.download")
+    def test_missing_close_column_yields_empty_dict_for_that_ticker(self, download):
+        index = pd.to_datetime(["2026-01-02"])
+        download.return_value = pd.DataFrame({"Foo": [1]}, index=index)
+
+        result = YahooFinanceStock.get_daily_values_for_tickers(["AAPL"], "2026-01-01", "2026-01-05")
+
+        assert result == {"AAPL": {}}
 
 
 class TestSearchStocks:

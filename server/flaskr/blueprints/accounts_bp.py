@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from flask import Blueprint, jsonify, request
 
-from flaskr.services.database import get_account_balance, update_account_balance, record_cash_transaction, get_cash_transactions
+from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_transactions
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
 
@@ -30,7 +30,9 @@ def get_balance():
 
 @accounts_bp.get("/transactions")
 def get_cash_transactions_route():
-    return jsonify(get_cash_transactions()), 200
+    transactions = get_transactions(include_cash_transactions=True)
+    cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
+    return jsonify(cash_transactions), 200
 
 
 @accounts_bp.post("/deposit")
@@ -40,8 +42,7 @@ def deposit():
     if error:
         return jsonify({"error": error}), 400
 
-    update_account_balance(amount, account_id=1)
-    record_cash_transaction(amount)
+    deposit_cash(amount)
     balance = get_account_balance(1)
     return jsonify({"account_id": 1, "balance": float(balance)}), 201
 
@@ -53,11 +54,10 @@ def withdraw():
     if error:
         return jsonify({"error": error}), 400
 
-    balance = get_account_balance(1)
-    if amount > balance:
-        return jsonify({"error": "Insufficient funds"}), 400
+    try:
+        withdraw_cash(amount)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
-    update_account_balance(-amount, account_id=1)
-    record_cash_transaction(-amount)
     balance = get_account_balance(1)
     return jsonify({"account_id": 1, "balance": float(balance)}), 201
