@@ -154,8 +154,8 @@ class PortfolioPerformanceCacheTests(unittest.TestCase):
 
         # A deposit lands on 2026-01-05 -- after the narrow range's end_date
         # but within the wide range. It must not shift the shared 01-02 value.
-        narrow_dates, _, narrow_cash = database.get_portfolio_performance("2026-01-01", "2026-01-02")
-        wide_dates, _, wide_cash = database.get_portfolio_performance("2026-01-01", "2026-01-05")
+        narrow_dates, _, narrow_cash = database.get_portfolio_performance(ACCOUNT_ID, "2026-01-01", "2026-01-02")
+        wide_dates, _, wide_cash = database.get_portfolio_performance(ACCOUNT_ID, "2026-01-01", "2026-01-05")
 
         self.assertEqual(narrow_dates, ["2026-01-02"])
         self.assertEqual(wide_dates, ["2026-01-02", "2026-01-05"])

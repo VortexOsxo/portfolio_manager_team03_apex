@@ -107,7 +107,7 @@ def get_summary():
     )
     total_realized_pnl = sum(realized.values())
     realized_lots = sorted(
-        performance.compute_realized_lots(get_transactions()),
+        performance.compute_realized_lots(get_transactions(account_id)),
         key=lambda lot: lot['date'],
         reverse=True,
     )
