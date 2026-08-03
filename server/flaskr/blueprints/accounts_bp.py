@@ -15,13 +15,19 @@ def _parse_amount(data):
 
 @accounts_bp.get("/balance")
 def get_balance():
-    balance = get_account_balance(1)
+    try:
+        balance = get_account_balance(1)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify({"account_id": 1, "balance": float(balance)}), 200
 
 
 @accounts_bp.get("/transactions")
 def get_cash_transactions_route():
-    transactions = get_transactions(include_cash_transactions=True)
+    try:
+        transactions = get_transactions(include_cash_transactions=True)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
     return jsonify(cash_transactions), 200
 

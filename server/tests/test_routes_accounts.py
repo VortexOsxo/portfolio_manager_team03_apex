@@ -13,15 +13,38 @@ class TestGetBalanceRoute:
         assert response.get_json() == {"account_id": 1, "balance": 25000.0}
 
     @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_missing_account_surfaces_as_a_bare_500_not_a_json_error(self, mock_get_balance, client):
-        # No try/except around get_account_balance here either, unlike
-        # /accounts/deposit and /withdraw's clean 400 JSON errors.
+    def test_missing_account_returns_400_with_json_error(self, mock_get_balance, client):
         mock_get_balance.side_effect = ValueError("Account 1 not found")
 
         response = client.get("/accounts/balance")
 
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "Account 1 not found"}
+
+
+class TestGetCashTransactionsRoute:
+    @patch("flaskr.blueprints.accounts_bp.get_transactions")
+    def test_returns_only_deposit_and_withdrawal_transactions(self, mock_get_transactions, client):
+        mock_get_transactions.return_value = [
+            {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 10, "cost_basis": 100.0, "transaction_date": "2026-01-01"},
+            {"tr_id": 2, "type": "deposit", "ticker": None, "amount": 500, "cost_basis": None, "transaction_date": "2026-01-02"},
+            {"tr_id": 3, "type": "withdrawal", "ticker": None, "amount": -200, "cost_basis": None, "transaction_date": "2026-01-03"},
+        ]
+
+        response = client.get("/accounts/transactions")
+
+        assert response.status_code == 200
+        assert [tx["tr_id"] for tx in response.get_json()] == [2, 3]
+        mock_get_transactions.assert_called_once_with(include_cash_transactions=True)
+
+    @patch("flaskr.blueprints.accounts_bp.get_transactions")
+    def test_db_failure_returns_500_with_json_error(self, mock_get_transactions, client):
+        mock_get_transactions.side_effect = Exception("db connection lost")
+
+        response = client.get("/accounts/transactions")
+
         assert response.status_code == 500
-        assert response.get_json() is None
+        assert response.get_json() == {"error": "db connection lost"}
 
 
 class TestDepositRoute:
