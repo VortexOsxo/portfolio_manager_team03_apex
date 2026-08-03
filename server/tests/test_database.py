@@ -158,14 +158,95 @@ class TestUpdateAccountBalance:
 
     @patch("flaskr.services.database.write_query")
     def test_opens_its_own_connection_when_no_cursor_given(self, mock_write_query):
-        # This is the path accounts_bp's deposit/withdraw routes use -- each
-        # call is its own standalone transaction, not covered by any lock.
+        # Every current caller (buy/sell_holding, deposit_cash,
+        # withdraw_cash) passes its own locked cursor; this covers the
+        # standalone branch as a unit even though nothing exercises it
+        # in production right now.
         database.update_account_balance(Decimal("50.00"), account_id=1)
 
         mock_write_query.assert_called_once_with(
             "UPDATE accounts SET balance = balance + %s WHERE id = %s;",
             (Decimal("50.00"), 1),
         )
+
+
+class TestDepositCash:
+    @patch("flaskr.services.database.get_db_connection")
+    def test_credits_the_account_and_logs_a_deposit_transaction(self, mock_get_db_connection):
+        mock_cursor = mock_get_db_connection.return_value.cursor.return_value
+
+        database.deposit_cash(100, transaction_date=date(2024, 1, 1))
+
+        insert_query, insert_params = mock_cursor.execute.call_args_list[0][0]
+        assert "'deposit'" in insert_query
+        assert insert_params == (Decimal("100"), date(2024, 1, 1))
+        assert mock_cursor.execute.call_args_list[1][0][0].startswith("UPDATE accounts SET balance")
+        mock_get_db_connection.return_value.commit.assert_called_once()
+
+    @patch("flaskr.services.database.get_db_connection")
+    def test_takes_no_row_lock_since_a_credit_cannot_overdraw(self, mock_get_db_connection):
+        # Unlike withdraw_cash, deposit_cash never branches on the current
+        # balance, so there's nothing for a lock to protect here.
+        mock_cursor = mock_get_db_connection.return_value.cursor.return_value
+
+        database.deposit_cash(100, transaction_date=date(2024, 1, 1))
+
+        executed_queries = [call.args[0] for call in mock_cursor.execute.call_args_list]
+        assert not any("FOR UPDATE" in query for query in executed_queries)
+
+
+class TestWithdrawCash:
+    @patch("flaskr.services.database.get_db_connection")
+    def test_debits_the_account_and_logs_a_withdrawal_transaction(self, mock_get_db_connection):
+        mock_cursor = mock_get_db_connection.return_value.cursor.return_value
+        mock_cursor.fetchone.return_value = (Decimal("30000.00"),)
+
+        database.withdraw_cash(100, transaction_date=date(2024, 1, 1))
+
+        insert_query, insert_params = mock_cursor.execute.call_args_list[1][0]
+        assert "'withdrawal'" in insert_query
+        assert insert_params == (Decimal("100"), date(2024, 1, 1))
+        assert mock_cursor.execute.call_args_list[2][0][0].startswith("UPDATE accounts SET balance")
+
+    @patch("flaskr.services.database.get_db_connection")
+    def test_locks_the_account_row_before_checking_the_balance(self, mock_get_db_connection):
+        # Unlike sell_holding's shares check, withdraw_cash reads the
+        # balance with SELECT ... FOR UPDATE, so two concurrent withdrawals
+        # can't both read the same starting balance and jointly overdraw --
+        # the second blocks until the first's transaction commits.
+        mock_cursor = mock_get_db_connection.return_value.cursor.return_value
+        mock_cursor.fetchone.return_value = (Decimal("100.00"),)
+
+        database.withdraw_cash(60, transaction_date=date(2024, 1, 1))
+
+        first_query = mock_cursor.execute.call_args_list[0][0][0]
+        assert "FOR UPDATE" in first_query
+
+    @patch("flaskr.services.database.get_db_connection")
+    def test_withdrawing_more_than_balance_raises_and_rolls_back(self, mock_get_db_connection):
+        mock_conn = mock_get_db_connection.return_value
+        mock_cursor = mock_conn.cursor.return_value
+        mock_cursor.fetchone.return_value = (Decimal("100.00"),)
+
+        with pytest.raises(ValueError, match="Insufficient funds"):
+            database.withdraw_cash(100.01, transaction_date=date(2024, 1, 1))
+
+        mock_cursor.execute.assert_called_once()  # only the balance check, no INSERT
+        mock_conn.rollback.assert_called_once()
+        mock_conn.commit.assert_not_called()
+
+    @patch("flaskr.services.database.get_db_connection")
+    def test_withdrawing_exactly_the_full_balance_is_allowed(self, mock_get_db_connection):
+        mock_cursor = mock_get_db_connection.return_value.cursor.return_value
+        mock_cursor.fetchone.return_value = (Decimal("100.00"),)
+
+        database.withdraw_cash(100.00, transaction_date=date(2024, 1, 1))
+
+        insert_calls = [
+            call for call in mock_cursor.execute.call_args_list
+            if call.args[0].startswith("INSERT INTO transactions")
+        ]
+        assert len(insert_calls) == 1
 
 
 class TestGetStockPerformance:

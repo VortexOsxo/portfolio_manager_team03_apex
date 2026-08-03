@@ -25,16 +25,16 @@ class TestGetBalanceRoute:
 
 
 class TestDepositRoute:
-    @patch("flaskr.blueprints.accounts_bp.update_account_balance")
+    @patch("flaskr.blueprints.accounts_bp.deposit_cash")
     @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_happy_path_credits_the_account(self, mock_get_balance, mock_update, client):
+    def test_happy_path_credits_the_account(self, mock_get_balance, mock_deposit, client):
         mock_get_balance.return_value = Decimal("25100.00")
 
         response = client.post("/accounts/deposit", json={"amount": 100})
 
         assert response.status_code == 201
         assert response.get_json() == {"account_id": 1, "balance": 25100.0}
-        mock_update.assert_called_once_with(Decimal("100"), account_id=1)
+        mock_deposit.assert_called_once_with(Decimal("100"))
 
     def test_no_body_returns_400_with_json_error(self, client):
         # deposit/withdraw use get_json(silent=True), unlike buy/sell -- a
@@ -96,53 +96,31 @@ class TestDepositRoute:
 
 
 class TestWithdrawRoute:
-    @patch("flaskr.blueprints.accounts_bp.update_account_balance")
+    # The balance check and the lock now both live inside withdraw_cash
+    # (see TestWithdrawCash in test_database.py for the "insufficient
+    # funds" and "exactly the full balance" boundary cases, and for the
+    # FOR UPDATE lock that closes the race the old route-level check used
+    # to leave open) -- these route tests just cover request wiring.
+    @patch("flaskr.blueprints.accounts_bp.withdraw_cash")
     @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_happy_path_debits_the_account(self, mock_get_balance, mock_update, client):
+    def test_happy_path_debits_the_account(self, mock_get_balance, mock_withdraw, client):
         mock_get_balance.return_value = Decimal("24900.00")
 
         response = client.post("/accounts/withdraw", json={"amount": 100})
 
         assert response.status_code == 201
-        mock_update.assert_called_once_with(Decimal("-100"), account_id=1)
+        assert response.get_json() == {"account_id": 1, "balance": 24900.0}
+        mock_withdraw.assert_called_once_with(Decimal("100"))
 
-    @patch("flaskr.blueprints.accounts_bp.update_account_balance")
-    @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_withdrawing_more_than_balance_returns_400(self, mock_get_balance, mock_update, client):
-        mock_get_balance.return_value = Decimal("100.00")
+    @patch("flaskr.blueprints.accounts_bp.withdraw_cash")
+    def test_withdrawing_more_than_balance_returns_400(self, mock_withdraw, client):
+        mock_withdraw.side_effect = ValueError(
+            "Insufficient funds: withdrawal of 100.01 exceeds available balance of 100.00"
+        )
 
         response = client.post("/accounts/withdraw", json={"amount": 100.01})
 
         assert response.status_code == 400
-        assert response.get_json() == {"error": "Insufficient funds"}
-        mock_update.assert_not_called()
-
-    @patch("flaskr.blueprints.accounts_bp.update_account_balance")
-    @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_withdrawing_exactly_the_full_balance_is_allowed(self, mock_get_balance, mock_update, client):
-        mock_get_balance.return_value = Decimal("100.00")
-
-        response = client.post("/accounts/withdraw", json={"amount": 100.00})
-
-        assert response.status_code == 201
-        mock_update.assert_called_once_with(Decimal("-100.0"), account_id=1)
-
-    @patch("flaskr.blueprints.accounts_bp.update_account_balance")
-    @patch("flaskr.blueprints.accounts_bp.get_account_balance")
-    def test_two_withdrawals_against_a_stale_balance_both_succeed(
-        self, mock_get_balance, mock_update, client
-    ):
-        # Documents the TOCTOU gap: the balance read and the write are two
-        # separate, unlocked statements. Here get_account_balance keeps
-        # returning the same starting balance regardless of the first
-        # withdrawal's update call (nothing decrements it), so a second
-        # concurrent-in-spirit withdrawal for the same amount also passes
-        # the check -- in a real unlocked DB, both could succeed and overdraw.
-        mock_get_balance.return_value = Decimal("100.00")
-
-        first = client.post("/accounts/withdraw", json={"amount": 60})
-        second = client.post("/accounts/withdraw", json={"amount": 60})
-
-        assert first.status_code == 201
-        assert second.status_code == 201
-        assert mock_update.call_count == 2
+        assert response.get_json() == {
+            "error": "Insufficient funds: withdrawal of 100.01 exceeds available balance of 100.00"
+        }
