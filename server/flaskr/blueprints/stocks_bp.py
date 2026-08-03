@@ -18,15 +18,19 @@ _MAX_INFO_WORKERS = 10
 
 
 def _parse_date_range(start_date, end_date):
-    """Validate start_date/end_date are well-formed "YYYY-MM-DD" strings.
+    """Validate start_date/end_date are well-formed "YYYY-MM-DD" strings
+    with start_date on or before end_date.
 
     Returns None on success, or an error message string.
     """
     try:
-        datetime.strptime(start_date, "%Y-%m-%d")
-        datetime.strptime(end_date, "%Y-%m-%d")
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
     except ValueError:
         return "start_date and end_date must be in YYYY-MM-DD format"
+
+    if start > end:
+        return "start_date must not be after end_date"
 
     return None
 

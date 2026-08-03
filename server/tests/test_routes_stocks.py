@@ -2,7 +2,6 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import mysql.connector.errors
-import pandas as pd
 import pytest
 
 from flaskr.services import database
@@ -164,6 +163,12 @@ class TestPerformanceRoute:
         assert response.status_code == 400
         assert response.get_json() == {"error": "start_date and end_date must be in YYYY-MM-DD format"}
 
+    def test_reversed_range_returns_400(self, client):
+        response = client.get("/stocks/performance?start_date=2026-01-10&end_date=2026-01-01")
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date must not be after end_date"}
+
 
 class TestSingleTickerPerformanceRoute:
     def test_requires_both_dates(self, client):
@@ -188,18 +193,16 @@ class TestSingleTickerPerformanceRoute:
         assert response.status_code == 400
         assert response.get_json() == {"error": "start_date and end_date must be in YYYY-MM-DD format"}
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
-    def test_reversed_range_crashes_on_a_non_datetime_index(self, mock_ticker_cls, client):
-        # Real yfinance rejects start > end and comes back with an empty
-        # DataFrame carrying a plain Index rather than a DatetimeIndex, so
-        # `.strftime()` in get_market_trading_days blows up. Reproduced here
-        # without hitting the network by mocking yf.Ticker directly.
-        mock_ticker_cls.return_value.history.return_value = pd.DataFrame({"Close": []})
-
+    def test_reversed_range_returns_400(self, client):
+        # Previously this reached real yfinance, which rejects start > end
+        # by coming back with an empty DataFrame carrying a plain Index
+        # instead of a DatetimeIndex, so `.strftime()` deep in
+        # get_market_trading_days blew up into a bare-message 500.
+        # _parse_date_range now rejects the range before that code runs.
         response = client.get("/stocks/performance/AAPL?start_date=2026-01-10&end_date=2026-01-01")
 
-        assert response.status_code == 500
-        assert "has no attribute 'strftime'" in response.get_json()["error"]
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date must not be after end_date"}
 
 
 class TestBuyRoute:
