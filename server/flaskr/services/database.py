@@ -268,13 +268,14 @@ def get_portfolio_performance(start_date, end_date):
     equity_transactions = get_transactions()
     all_transactions = get_transactions(include_cash_transactions=True)
     current_cash_balance = float(get_account_balance())
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    reconstructed_today = performance.compute_cash_balances([today], all_transactions)[0]
+    cash_offset = current_cash_balance - reconstructed_today
 
     def _anchor_to_current_balance(balances):
-        # Corrects drift from starting capital that predates the transaction log.
-        if not balances:
-            return balances
-        offset = current_cash_balance - balances[-1]
-        return [round(value + offset, 2) for value in balances]
+        # Offset is anchored to today regardless of the requested range, so a
+        # past end_date can't fold later deposits/withdrawals into the shift.
+        return [round(value + cash_offset, 2) for value in balances]
 
     tickers = performance.get_tickers_for_range(start_date, end_date, equity_transactions)
     if not tickers:

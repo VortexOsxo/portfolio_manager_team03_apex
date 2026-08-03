@@ -16,12 +16,8 @@ const PERFORMANCE_RANGES = [
   { label: "1Y", months: 12 },
 ];
 
-// Matches the backend's _PERFORMANCE_CACHE_TTL_SECONDS, so client and server
-// go stale together instead of the client trusting a long-dead server cache.
 const PERFORMANCE_CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Matches --accent-solid / the modal-panel surface in styles.css -- kept as
-// literals since Recharts props need plain color strings, not CSS vars.
 const CHART_ACCENT = "#6d6cff";
 const CHART_SURFACE = "#12142a";
 
@@ -210,6 +206,7 @@ function App() {
   const [historyPerformance, setHistoryPerformance] = useState([]);
   const [historyPerformanceLoading, setHistoryPerformanceLoading] = useState(false);
   const [modalClosing, setModalClosing] = useState(false);
+  const activeHistoryRequestRef = useRef(0);
 
   const [quote, setQuote] = useState(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -337,7 +334,7 @@ function App() {
     const handle = setTimeout(() => {
       fetch(`/api/stocks/search?q=${encodeURIComponent(ticker)}`, { signal: controller.signal })
         .then((res) => (res.ok ? res.json() : []))
-        .then((data) => setTickerResults(data))
+        .then((data) => setTickerResults(Array.isArray(data) ? data : []))
         .catch((err) => {
           if (err.name !== "AbortError") setTickerResults([]);
         });
@@ -438,7 +435,7 @@ function App() {
         setAmount("");
         performanceCacheRef.current.clear();
         fetchHoldings();
-        fetchHistoryTransactions(historyTicker);
+        fetchHistoryTransactions(historyTicker, activeHistoryRequestRef.current);
       })
       .catch((err) => setTradeError(err.message))
       .finally(() => setSubmitting(false));
@@ -464,6 +461,12 @@ function App() {
       setFundError("Enter an amount greater than 0");
       return;
     }
+    if (fundType === "withdraw" && summary?.cash_balance != null && Number(fundAmount) > summary.cash_balance) {
+      setFundError(
+      `You only have ${formatCurrency(summary.cash_balance)} available to withdraw.`
+      );
+      return;
+      }
     setFundError(null);
     setFundSubmitting(true);
 
@@ -486,7 +489,7 @@ function App() {
       .finally(() => setFundSubmitting(false));
   };
 
-  const fetchHistoryTransactions = (tickerSymbol) => {
+  const fetchHistoryTransactions = (tickerSymbol, requestId) => {
     setHistoryLoading(true);
     setHistoryError(null);
     return fetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
@@ -494,12 +497,18 @@ function App() {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         return res.json();
       })
-      .then((data) => setHistoryTransactions(data))
-      .catch((err) => setHistoryError(err.message))
-      .finally(() => setHistoryLoading(false));
+      .then((data) => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryTransactions(data);
+      })
+      .catch((err) => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryError(err.message);
+      })
+      .finally(() => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryLoading(false);
+      });
   };
 
-  const fetchQuote = (tickerSymbol) => {
+  const fetchQuote = (tickerSymbol, requestId) => {
     setQuote(null);
     setQuoteLoading(true);
     setQuoteError(null);
@@ -509,12 +518,19 @@ function App() {
         if (!res.ok) throw new Error(body.error || `Couldn't find "${tickerSymbol}"`);
         return body;
       })
-      .then((data) => setQuote(data))
-      .catch((err) => setQuoteError(err.message))
-      .finally(() => setQuoteLoading(false));
+      .then((data) => {
+        if (requestId === activeHistoryRequestRef.current) setQuote(data);
+      })
+      .catch((err) => {
+        if (requestId === activeHistoryRequestRef.current) setQuoteError(err.message);
+      })
+      .finally(() => {
+        if (requestId === activeHistoryRequestRef.current) setQuoteLoading(false);
+      });
   };
 
   const openHistory = (tickerSymbol) => {
+    const requestId = (activeHistoryRequestRef.current += 1);
     setHistoryTicker(tickerSymbol);
     setHistoryTransactions([]);
     setHistoryPerformance([]);
@@ -523,13 +539,14 @@ function App() {
     setAmount("");
     setTradeError(null);
 
-    fetchHistoryTransactions(tickerSymbol);
-    fetchQuote(tickerSymbol);
+    fetchHistoryTransactions(tickerSymbol, requestId);
+    fetchQuote(tickerSymbol, requestId);
 
     const { startDate, endDate } = getPerformanceDates("3M");
     fetch(`/api/stocks/performance/${encodeURIComponent(tickerSymbol)}?start_date=${startDate}&end_date=${endDate}`)
       .then((res) => (res.ok ? res.json() : { dates: [], equity: [] }))
       .then((data) => {
+        if (requestId !== activeHistoryRequestRef.current) return;
         const dates = Array.isArray(data.dates) ? data.dates : [];
         const equity = Array.isArray(data.equity) ? data.equity : [];
         const chartData = dates
@@ -538,8 +555,12 @@ function App() {
           .filter((point) => Number.isFinite(point.value));
         setHistoryPerformance(chartData);
       })
-      .catch(() => setHistoryPerformance([]))
-      .finally(() => setHistoryPerformanceLoading(false));
+      .catch(() => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryPerformance([]);
+      })
+      .finally(() => {
+        if (requestId === activeHistoryRequestRef.current) setHistoryPerformanceLoading(false);
+      });
   };
 
   const closeHistory = () => {
