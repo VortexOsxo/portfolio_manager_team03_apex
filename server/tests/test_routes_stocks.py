@@ -7,16 +7,48 @@ import pytest
 
 from flaskr.services import database
 
+ACCOUNT_ID = 1
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
 def clear_performance_cache():
-    # _PERFORMANCE_CACHE is module-level and keyed by (start_date, end_date);
+    # _PERFORMANCE_CACHE is module-level and keyed by (account_id, start_date, end_date);
     # tests in this file reuse the same date strings, so a hit from one test
     # would otherwise be served to the next.
-    database.clear_performance_cache()
+    database.clear_performance_cache(ACCOUNT_ID)
     yield
-    database.clear_performance_cache()
+    database.clear_performance_cache(ACCOUNT_ID)
 
+
+@pytest.fixture()
+def client(app):
+    """Test client that automatically attaches a valid JWT for ACCOUNT_ID."""
+    from flask_jwt_extended import create_access_token
+
+    with app.app_context():
+        token = create_access_token(identity=str(ACCOUNT_ID))
+
+    test_client = app.test_client()
+    # Wrap the standard request methods to inject the Authorization header.
+    _orig_open = test_client.open
+
+    def open_with_jwt(*args, **kwargs):
+        headers = kwargs.pop("headers", {})
+        if isinstance(headers, dict):
+            headers = {**headers, "Authorization": f"Bearer {token}"}
+        return _orig_open(*args, headers=headers, **kwargs)
+
+    test_client.open = open_with_jwt
+    return test_client
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
 class TestSearchRoute:
     @patch("flaskr.blueprints.stocks_bp.search_stocks")
@@ -43,6 +75,7 @@ class TestGetHoldingsRoute:
         body = response.get_json()
         assert body["AAPL"]["amount"] == 10
         assert body["AAPL"]["current_price"] == 150.0  # mock_yahoo's default
+        mock_get_transactions.assert_called_once_with(ACCOUNT_ID)
 
     @patch("flaskr.blueprints.stocks_bp.get_transactions")
     def test_no_transactions_returns_empty_object(self, mock_get_transactions, client):
@@ -86,6 +119,7 @@ class TestGetSummaryRoute:
         body = response.get_json()
         assert body["cash_balance"] == 29000.0
         assert body["net_worth"] == pytest.approx(29000.0 + 10 * 150.0)
+        mock_get_balance.assert_called_once_with(ACCOUNT_ID)
 
     @patch("flaskr.blueprints.stocks_bp.get_account_balance")
     @patch("flaskr.blueprints.stocks_bp.get_transactions")
@@ -95,7 +129,7 @@ class TestGetSummaryRoute:
         # Same gap as GET /stocks/: no try/except around get_account_balance,
         # unlike /stocks/buy and /sell, which do catch ValueError cleanly.
         mock_get_transactions.return_value = []
-        mock_get_balance.side_effect = ValueError("Account 1 not found")
+        mock_get_balance.side_effect = ValueError(f"Account {ACCOUNT_ID} not found")
 
         response = client.get("/stocks/summary")
 
@@ -196,7 +230,7 @@ class TestBuyRoute:
         )
 
         assert response.status_code == 201
-        mock_buy.assert_called_once_with("AAPL", 10, 150.0, "2026-01-01")
+        mock_buy.assert_called_once_with(ACCOUNT_ID, "AAPL", 10, 150.0, "2026-01-01")
 
     def test_missing_ticker_or_amount_returns_400(self, client):
         response = client.post("/stocks/buy", json={"ticker": "AAPL"})
@@ -279,7 +313,7 @@ class TestSellRoute:
         )
 
         assert response.status_code == 201
-        mock_sell.assert_called_once_with("AAPL", 5, 160.0, "2026-01-03")
+        mock_sell.assert_called_once_with(ACCOUNT_ID, "AAPL", 5, 160.0, "2026-01-03")
 
     def test_missing_ticker_or_amount_returns_400(self, client):
         response = client.post("/stocks/sell", json={"amount": 5})

@@ -1,10 +1,94 @@
 from decimal import Decimal
 
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
-from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_transactions
+from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_user, create_user, get_transactions
+from werkzeug.security import check_password_hash, generate_password_hash
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
+
+
+@accounts_bp.post("/signup")
+def signup():
+    body = request.get_json()
+    username = body.get('username')
+    password = body.get('password')
+    if username is None or password is None:
+        return jsonify({"error": "Username and password required"}), 400
+
+    result = create_user(username=username, password=generate_password_hash(password))
+    if not result:
+        return jsonify({"error": "Username already taken"}), 409
+
+    user = get_user(username)
+    access_token = create_access_token(identity=str(user['id']))
+    return jsonify({"access_token": access_token, "username": user['username']}), 201
+
+
+@accounts_bp.post("/login")
+def login():
+    body = request.get_json()
+    username = body.get('username')
+    password = body.get('password')
+    if username is None or password is None:
+        return jsonify({"error": "Username and password required"}), 400
+
+    user = get_user(username)
+    if user is None or not check_password_hash(user.get('password'), password):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    access_token = create_access_token(identity=str(user['id']))
+    return jsonify({"access_token": access_token, "username": user['username']}), 200
+
+
+@accounts_bp.get("/balance")
+@jwt_required()
+def get_balance():
+    account_id = int(get_jwt_identity())
+    balance = get_account_balance(account_id)
+    return jsonify({"account_id": account_id, "balance": float(balance)}), 200
+
+
+@accounts_bp.get("/transactions")
+@jwt_required()
+def get_cash_transactions_route():
+    account_id = int(get_jwt_identity())
+    transactions = get_transactions(account_id, include_cash_transactions=True)
+    cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
+    return jsonify(cash_transactions), 200
+
+
+@accounts_bp.post("/deposit")
+@jwt_required()
+def deposit():
+    account_id = int(get_jwt_identity())
+    data = request.get_json(silent=True)
+    amount, error = _parse_amount(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    deposit_cash(account_id, amount)
+    balance = get_account_balance(account_id)
+    return jsonify({"account_id": account_id, "balance": float(balance)}), 201
+
+
+@accounts_bp.post("/withdraw")
+@jwt_required()
+def withdraw():
+    account_id = int(get_jwt_identity())
+    data = request.get_json(silent=True)
+    amount, error = _parse_amount(data)
+    if error:
+        return jsonify({"error": error}), 400
+
+    try:
+        withdraw_cash(account_id, amount)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    balance = get_account_balance(account_id)
+    return jsonify({"account_id": account_id, "balance": float(balance)}), 201
 
 
 def _parse_amount(data):
@@ -20,44 +104,3 @@ def _parse_amount(data):
         return None, "amount must be greater than zero"
 
     return amount, None
-
-
-@accounts_bp.get("/balance")
-def get_balance():
-    balance = get_account_balance(1)
-    return jsonify({"account_id": 1, "balance": float(balance)}), 200
-
-
-@accounts_bp.get("/transactions")
-def get_cash_transactions_route():
-    transactions = get_transactions(include_cash_transactions=True)
-    cash_transactions = [tx for tx in transactions if tx['type'] in ('deposit', 'withdrawal')]
-    return jsonify(cash_transactions), 200
-
-
-@accounts_bp.post("/deposit")
-def deposit():
-    data = request.get_json(silent=True)
-    amount, error = _parse_amount(data)
-    if error:
-        return jsonify({"error": error}), 400
-
-    deposit_cash(amount)
-    balance = get_account_balance(1)
-    return jsonify({"account_id": 1, "balance": float(balance)}), 201
-
-
-@accounts_bp.post("/withdraw")
-def withdraw():
-    data = request.get_json(silent=True)
-    amount, error = _parse_amount(data)
-    if error:
-        return jsonify({"error": error}), 400
-
-    try:
-        withdraw_cash(amount)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-    balance = get_account_balance(1)
-    return jsonify({"account_id": 1, "balance": float(balance)}), 201

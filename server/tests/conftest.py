@@ -13,7 +13,11 @@ def app():
     # of coming back as the 500 response a real deployment would return.
     # Explicitly forcing it off here so route tests can characterize actual
     # HTTP behavior instead of catching a raised exception in the test.
-    app.config.update(TESTING=True, PROPAGATE_EXCEPTIONS=False)
+    app.config.update(
+        TESTING=True,
+        PROPAGATE_EXCEPTIONS=False,
+        JWT_SECRET_KEY="test-secret-key-fksdfskdlfjklssdf",
+    )
     return app
 
 

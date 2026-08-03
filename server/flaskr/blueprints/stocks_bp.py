@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import jwt_required, get_jwt_identity
 import mysql
 
 from flaskr.services.database import (
@@ -30,9 +31,9 @@ def get_quote(ticker):
     return jsonify(info), 200
 
 
-def _build_holdings():
+def _build_holdings(account_id):
     """Group transactions by ticker"""
-    transactions = get_transactions()
+    transactions = get_transactions(account_id)
 
     amounts = {}
     for tx in transactions:
@@ -81,14 +82,18 @@ def _build_holdings():
 
 
 @stocks_bp.get("/")
+@jwt_required()
 def get_stocks():
-    holdings, _ = _build_holdings()
+    account_id = int(get_jwt_identity())
+    holdings, _ = _build_holdings(account_id)
     return jsonify(holdings), 200
 
 
 @stocks_bp.get("/summary")
+@jwt_required()
 def get_summary():
-    holdings, realized = _build_holdings()
+    account_id = int(get_jwt_identity())
+    holdings, realized = _build_holdings(account_id)
 
     total_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
     total_cost_basis = sum(
@@ -102,12 +107,12 @@ def get_summary():
     )
     total_realized_pnl = sum(realized.values())
     realized_lots = sorted(
-        performance.compute_realized_lots(get_transactions()),
+        performance.compute_realized_lots(get_transactions(account_id)),
         key=lambda lot: lot['date'],
         reverse=True,
     )
 
-    cash_balance = get_account_balance()
+    cash_balance = get_account_balance(account_id)
     net_worth = total_value + float(cash_balance)
 
     prior_value = total_value - total_day_change
@@ -130,7 +135,9 @@ def get_summary():
 
 
 @stocks_bp.get("/performance")
+@jwt_required()
 def get_performance():
+    account_id = int(get_jwt_identity())
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
 
@@ -138,7 +145,7 @@ def get_performance():
         return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
     try:
-        dates, equity, cash = get_portfolio_performance(start_date, end_date)
+        dates, equity, cash = get_portfolio_performance(account_id, start_date, end_date)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -165,8 +172,11 @@ def get_stock_performance_route(ticker):
         print(f"Error occurred: {e}")
         return "", 400
 
+
 @stocks_bp.post("/buy")
+@jwt_required()
 def buy_stock():
+    account_id = int(get_jwt_identity())
     data = request.get_json()
     ticker = data.get("ticker")
     amount = data.get("amount")
@@ -177,16 +187,19 @@ def buy_stock():
     cost_basis = data.get("cost_basis")
     transaction_date = data.get("transaction_date")
     try:
-        buy_holding(ticker, amount, cost_basis, transaction_date)
-    except mysql.connector.errors.IntegrityError as e:
+        buy_holding(account_id, ticker, amount, cost_basis, transaction_date)
+    except mysql.connector.errors.IntegrityError:
         return "", 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
     return jsonify({"message": "Stock bought successfully"}), 201
 
+
 @stocks_bp.post("/sell")
+@jwt_required()
 def sell_stock():
+    account_id = int(get_jwt_identity())
     data = request.get_json()
     ticker = data.get("ticker")
     amount = data.get("amount")
@@ -197,8 +210,8 @@ def sell_stock():
     cost_basis = data.get("cost_basis")
     transaction_date = data.get("transaction_date")
     try:
-        sell_holding(ticker, amount, cost_basis, transaction_date)
-    except mysql.connector.errors.IntegrityError as e:
+        sell_holding(account_id, ticker, amount, cost_basis, transaction_date)
+    except mysql.connector.errors.IntegrityError:
         return "", 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
