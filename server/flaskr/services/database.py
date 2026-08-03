@@ -45,12 +45,12 @@ def read_query(query, params=None):
     conn.close()
     return result
 
-def get_transactions(ticker=None, start_date=None, end_date=None, include_cash_transactions=False):
+def get_transactions(account_id, ticker=None, start_date=None, end_date=None, include_cash_transactions=False):
     query = (
         "SELECT tr_id, type, ticker, amount, cost_basis, transaction_date "
-        "FROM transactions WHERE 1=1"
+        "FROM transactions WHERE account_id = %s"
     )
-    params = ()
+    params = (account_id,)
 
     if not include_cash_transactions:
         query += " AND type IN ('buy', 'sell')"
@@ -79,7 +79,7 @@ def get_transactions(ticker=None, start_date=None, end_date=None, include_cash_t
     ]
 
 
-def get_account_balance(account_id=1):
+def get_account_balance(account_id):
     result = read_query("SELECT balance FROM accounts WHERE id = %s;", (account_id,))
     if not result:
         raise ValueError(f"Account {account_id} not found")
@@ -104,7 +104,7 @@ def update_account_balance(amount, account_id=1, cursor=None):
         write_query(query, params)
 
 
-def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
+def buy_holding(account_id, ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(Decimal(str(amount)))
 
     if cost_basis is None:
@@ -125,7 +125,7 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (1,))
+        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (account_id,))
         row = cursor.fetchone()
 
         cash_balance = Decimal(str(row[0] or 0))
@@ -136,11 +136,11 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
             )
 
         cursor.execute(
-            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
-            "VALUES ('buy', %s, %s, %s, %s)",
-            (ticker, amount, cost_basis, transaction_date)
+            "INSERT INTO transactions (account_id, type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES (%s, 'buy', %s, %s, %s, %s)",
+            (account_id, ticker, amount, cost_basis, transaction_date)
         )
-        update_account_balance(-total_cost, account_id=1, cursor=cursor)
+        update_account_balance(-total_cost, account_id=account_id, cursor=cursor)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -152,7 +152,7 @@ def buy_holding(ticker, amount, cost_basis=None, transaction_date=None):
     clear_performance_cache()
 
 
-def deposit_cash(amount, transaction_date=None):
+def deposit_cash(account_id, amount, transaction_date=None):
     amount = abs(Decimal(str(amount)))
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -161,11 +161,11 @@ def deposit_cash(amount, transaction_date=None):
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
-            "VALUES ('deposit', NULL, %s, NULL, %s)",
-            (amount, transaction_date),
+            "INSERT INTO transactions (account_id, type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES (%s, 'deposit', NULL, %s, NULL, %s)",
+            (account_id, amount, transaction_date),
         )
-        update_account_balance(amount, account_id=1, cursor=cursor)
+        update_account_balance(amount, account_id=account_id, cursor=cursor)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -177,7 +177,7 @@ def deposit_cash(amount, transaction_date=None):
     clear_performance_cache()
 
 
-def withdraw_cash(amount, transaction_date=None):
+def withdraw_cash(account_id, amount, transaction_date=None):
     amount = abs(Decimal(str(amount)))
     if transaction_date is None:
         transaction_date = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -185,7 +185,7 @@ def withdraw_cash(amount, transaction_date=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (1,))
+        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (account_id,))
         row = cursor.fetchone()
         cash_balance = Decimal(str(row[0] or 0))
         if amount > cash_balance:
@@ -195,11 +195,11 @@ def withdraw_cash(amount, transaction_date=None):
             )
 
         cursor.execute(
-            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
-            "VALUES ('withdrawal', NULL, %s, NULL, %s)",
-            (amount, transaction_date),
+            "INSERT INTO transactions (account_id, type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES (%s, 'withdrawal', NULL, %s, NULL, %s)",
+            (account_id, amount, transaction_date),
         )
-        update_account_balance(-amount, account_id=1, cursor=cursor)
+        update_account_balance(-amount, account_id=account_id, cursor=cursor)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -211,17 +211,17 @@ def withdraw_cash(amount, transaction_date=None):
     clear_performance_cache()
 
 
-def get_holding_amount(ticker, date=None):
-    query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE ticker = %s" +\
-    ("AND transaction_date <= %s;" if date else ";")
-    params = (ticker, date) if date else (ticker,)
+def get_holding_amount(account_id, ticker, date=None):
+    query = "SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE account_id = %s AND ticker = %s" +\
+    (" AND transaction_date <= %s;" if date else ";")
+    params = (account_id, ticker, date) if date else (account_id, ticker)
 
     result = read_query(query, params)
     return result[0][0]
 
-def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
+def sell_holding(account_id, ticker, amount, cost_basis=None, transaction_date=None):
     amount = abs(Decimal(str(amount)))
-    current_amount = Decimal(str(get_holding_amount(ticker)))
+    current_amount = Decimal(str(get_holding_amount(account_id, ticker)))
     if amount > current_amount:
         raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
 
@@ -237,11 +237,11 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
-            "VALUES ('sell', %s, %s, %s, %s)",
-            (ticker, -amount, cost_basis, transaction_date)
+            "INSERT INTO transactions (account_id, type, ticker, amount, cost_basis, transaction_date) "
+            "VALUES (%s, 'sell', %s, %s, %s, %s)",
+            (account_id, ticker, -amount, cost_basis, transaction_date)
         )
-        update_account_balance(total_proceeds, account_id=1, cursor=cursor)
+        update_account_balance(total_proceeds, account_id=account_id, cursor=cursor)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -252,21 +252,21 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
 
     clear_performance_cache()
 
-def get_traded_tickers():
-    query = "SELECT DISTINCT ticker FROM transactions WHERE type IN ('buy', 'sell');"
-    result = read_query(query)
+def get_traded_tickers(account_id):
+    query = "SELECT DISTINCT ticker FROM transactions WHERE account_id = %s AND type IN ('buy', 'sell');"
+    result = read_query(query, (account_id,))
     return [row[0] for row in result]
 
-def get_portfolio_performance(start_date, end_date):
-    cache_key = (str(start_date), str(end_date))
+def get_portfolio_performance(account_id, start_date, end_date):
+    cache_key = (str(account_id), str(start_date), str(end_date))
     now = time.monotonic()
     with _PERFORMANCE_CACHE_LOCK:
         cached = _PERFORMANCE_CACHE.get(cache_key)
         if cached is not None and now - cached["created_at"] < _PERFORMANCE_CACHE_TTL_SECONDS:
             return list(cached["dates"]), list(cached["equity"]), list(cached["cash"])
 
-    equity_transactions = get_transactions()
-    all_transactions = get_transactions(include_cash_transactions=True)
+    equity_transactions = get_transactions(account_id)
+    all_transactions = get_transactions(account_id, include_cash_transactions=True)
 
     tickers = performance.get_tickers_for_range(start_date, end_date, equity_transactions)
     if not tickers:
@@ -316,7 +316,7 @@ def get_stock_performance(ticker, start_date, end_date):
 def create_user(username, password):
     try:
         query = "INSERT INTO accounts (username, password, balance) VALUES (%s, %s, %s);"
-        params = (username, password, 30000)
+        params = (username, password, 0)
 
         write_query(query, params)
         return True
