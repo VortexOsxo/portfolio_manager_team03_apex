@@ -54,12 +54,9 @@ class TestGetHoldingsRoute:
         assert response.get_json() == {}
 
     @patch("flaskr.blueprints.stocks_bp.get_transactions")
-    def test_yahoo_failure_surfaces_as_a_bare_500_not_a_json_error(
+    def test_yahoo_failure_returns_500_with_json_error(
         self, mock_get_transactions, client, mock_yahoo
     ):
-        # _build_holdings has no try/except around the Yahoo call, unlike the
-        # JSON-error pattern used by /stocks/performance. Documents current
-        # behavior, doesn't fix it.
         mock_get_transactions.return_value = [
             {"tr_id": 1, "ticker": "AAPL", "amount": 10, "cost_basis": 100.0, "transaction_date": "2026-01-01"},
         ]
@@ -68,7 +65,37 @@ class TestGetHoldingsRoute:
         response = client.get("/stocks/")
 
         assert response.status_code == 500
-        assert response.get_json() is None  # HTML error page, not a JSON envelope
+        assert response.get_json() == {"error": "yahoo down"}
+
+
+class TestGetQuoteRoute:
+    def test_returns_the_quote_for_any_ticker(self, client, mock_yahoo):
+        response = client.get("/stocks/quote/AAPL")
+
+        assert response.status_code == 200
+        assert response.get_json()["company_name"] == "Apple Inc."
+
+    def test_unknown_ticker_returns_404(self, client, mock_yahoo):
+        mock_yahoo.return_value.get_info.return_value = {
+            "stock_ticker": "NOTREAL",
+            "company_name": None,
+            "current_price": None,
+            "day_change": None,
+            "day_change_pct": None,
+        }
+
+        response = client.get("/stocks/quote/NOTREAL")
+
+        assert response.status_code == 404
+        assert response.get_json() == {"error": 'No quote found for "NOTREAL"'}
+
+    def test_yahoo_failure_returns_500_with_json_error(self, client, mock_yahoo):
+        mock_yahoo.return_value.get_info.side_effect = RuntimeError("yahoo down")
+
+        response = client.get("/stocks/quote/AAPL")
+
+        assert response.status_code == 500
+        assert response.get_json() == {"error": "yahoo down"}
 
 
 class TestGetSummaryRoute:
@@ -89,18 +116,16 @@ class TestGetSummaryRoute:
 
     @patch("flaskr.blueprints.stocks_bp.get_account_balance")
     @patch("flaskr.blueprints.stocks_bp.get_transactions")
-    def test_missing_account_surfaces_as_a_bare_500_not_a_json_error(
+    def test_missing_account_returns_500_with_json_error(
         self, mock_get_transactions, mock_get_balance, client
     ):
-        # Same gap as GET /stocks/: no try/except around get_account_balance,
-        # unlike /stocks/buy and /sell, which do catch ValueError cleanly.
         mock_get_transactions.return_value = []
         mock_get_balance.side_effect = ValueError("Account 1 not found")
 
         response = client.get("/stocks/summary")
 
         assert response.status_code == 500
-        assert response.get_json() is None
+        assert response.get_json() == {"error": "Account 1 not found"}
 
 
 class TestPerformanceRoute:

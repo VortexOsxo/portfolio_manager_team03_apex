@@ -40,7 +40,10 @@ def search_stocks_route():
 @stocks_bp.get("/quote/<string:ticker>")
 def get_quote(ticker):
     """Live price + company name for any ticker, owned or not. """
-    info = YahooFinanceStock(ticker.upper()).get_info()
+    try:
+        info = YahooFinanceStock(ticker.upper()).get_info()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     if info["company_name"] is None:
         return jsonify({"error": f'No quote found for "{ticker}"'}), 404
     return jsonify(info), 200
@@ -98,32 +101,39 @@ def _build_holdings():
 
 @stocks_bp.get("/")
 def get_stocks():
-    holdings, _ = _build_holdings()
+    try:
+        holdings, _ = _build_holdings()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     return jsonify(holdings), 200
 
 
 @stocks_bp.get("/summary")
 def get_summary():
-    holdings, realized = _build_holdings()
+    try:
+        holdings, realized = _build_holdings()
 
-    total_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
-    total_cost_basis = sum(
-        h['avg_cost'] * h['amount'] for h in holdings.values() if h['avg_cost'] is not None
-    )
-    total_unrealized_pnl = sum(
-        h['unrealized_pnl'] for h in holdings.values() if h['unrealized_pnl'] is not None
-    )
-    total_day_change = sum(
-        h['day_change'] for h in holdings.values() if h['day_change'] is not None
-    )
-    total_realized_pnl = sum(realized.values())
-    realized_lots = sorted(
-        performance.compute_realized_lots(get_transactions()),
-        key=lambda lot: lot['date'],
-        reverse=True,
-    )
+        total_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
+        total_cost_basis = sum(
+            h['avg_cost'] * h['amount'] for h in holdings.values() if h['avg_cost'] is not None
+        )
+        total_unrealized_pnl = sum(
+            h['unrealized_pnl'] for h in holdings.values() if h['unrealized_pnl'] is not None
+        )
+        total_day_change = sum(
+            h['day_change'] for h in holdings.values() if h['day_change'] is not None
+        )
+        total_realized_pnl = sum(realized.values())
+        realized_lots = sorted(
+            performance.compute_realized_lots(get_transactions()),
+            key=lambda lot: lot['date'],
+            reverse=True,
+        )
 
-    cash_balance = get_account_balance()
+        cash_balance = get_account_balance()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
     net_worth = total_value + float(cash_balance)
 
     prior_value = total_value - total_day_change
