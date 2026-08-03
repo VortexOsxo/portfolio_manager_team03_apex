@@ -130,21 +130,14 @@ class TestPerformanceRoute:
         assert response.get_json()["equity"] == [200.0]
         assert "cash" in response.get_json()
 
-    @patch("flaskr.services.database.get_account_balance")
-    @patch("flaskr.services.database.get_transactions")
-    def test_malformed_date_returns_500_with_a_json_error(self, mock_get_transactions, mock_get_account_balance, client):
-        # No date-format validation before the string reaches
-        # datetime.strptime deep inside YahooFinanceStock -- it raises, and
-        # the route's blanket except turns it into a 500 (not a 400).
-        mock_get_account_balance.return_value = Decimal("30000.00")
-        mock_get_transactions.return_value = [
-            {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 2, "cost_basis": 100.0, "transaction_date": "2026-01-02"},
-        ]
-
+    def test_malformed_date_returns_400(self, client):
+        # _parse_date_range now rejects this before get_portfolio_performance
+        # is ever called, instead of letting a strptime failure deep inside
+        # YahooFinanceStock surface as a 500.
         response = client.get("/stocks/performance?start_date=2026-01-01&end_date=not-a-date")
 
-        assert response.status_code == 500
-        assert "does not match format" in response.get_json()["error"]
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date and end_date must be in YYYY-MM-DD format"}
 
 
 class TestSingleTickerPerformanceRoute:
@@ -164,14 +157,11 @@ class TestSingleTickerPerformanceRoute:
         assert response.status_code == 200
         assert response.get_json() == {"dates": ["2026-01-02"], "equity": [150.0]}
 
-    def test_malformed_date_returns_500_with_a_json_error(self, client):
-        # Unlike the portfolio-wide route, this one has a doubled/nested
-        # try/except -- but the inner except still catches this and returns
-        # the same 500 + JSON error shape, not the outer bare "" 400.
+    def test_malformed_date_returns_400(self, client):
         response = client.get("/stocks/performance/AAPL?start_date=2026-01-01&end_date=not-a-date")
 
-        assert response.status_code == 500
-        assert "does not match format" in response.get_json()["error"]
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date and end_date must be in YYYY-MM-DD format"}
 
     @patch("flaskr.yahoo_finance.yf.Ticker")
     def test_reversed_range_crashes_on_a_non_datetime_index(self, mock_ticker_cls, client):

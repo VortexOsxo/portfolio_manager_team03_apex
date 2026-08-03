@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from decimal import InvalidOperation
 
 from flask import Blueprint, jsonify, request
@@ -14,6 +15,20 @@ from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
 stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
 
 _MAX_INFO_WORKERS = 10
+
+
+def _parse_date_range(start_date, end_date):
+    """Validate start_date/end_date are well-formed "YYYY-MM-DD" strings.
+
+    Returns None on success, or an error message string.
+    """
+    try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+        datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        return "start_date and end_date must be in YYYY-MM-DD format"
+
+    return None
 
 
 @stocks_bp.get("/search")
@@ -138,6 +153,10 @@ def get_performance():
     if not start_date or not end_date:
         return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
+    date_error = _parse_date_range(start_date, end_date)
+    if date_error:
+        return jsonify({"error": date_error}), 400
+
     try:
         dates, equity, cash = get_portfolio_performance(start_date, end_date)
     except Exception as e:
@@ -147,24 +166,22 @@ def get_performance():
 
 @stocks_bp.get("/performance/<string:ticker>")
 def get_stock_performance_route(ticker):
-    print('Received request for stock performance:', ticker)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date query parameters are required"}), 400
+
+    date_error = _parse_date_range(start_date, end_date)
+    if date_error:
+        return jsonify({"error": date_error}), 400
+
     try:
-        start_date = request.args.get("start_date")
-        end_date = request.args.get("end_date")
-
-        if not start_date or not end_date:
-            return jsonify({"error": "start_date and end_date query parameters are required"}), 400
-
-        try:
-            dates, equity = get_stock_performance(ticker, start_date, end_date)
-        except Exception as e:
-            print(e)
-            return jsonify({"error": str(e)}), 500
-
-        return jsonify({"dates": dates, "equity": equity}), 200
+        dates, equity = get_stock_performance(ticker, start_date, end_date)
     except Exception as e:
-        print(f"Error occurred: {e}")
-        return "", 400
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"dates": dates, "equity": equity}), 200
 
 @stocks_bp.post("/buy")
 def buy_stock():
