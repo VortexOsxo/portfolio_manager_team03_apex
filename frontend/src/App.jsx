@@ -18,6 +18,9 @@ const PERFORMANCE_RANGES = [
 
 const PERFORMANCE_CACHE_TTL_MS = 5 * 60 * 1000;
 
+const MIN_USERNAME_LENGTH = 3;
+const MIN_PASSWORD_LENGTH = 8;
+
 const CHART_ACCENT = "#6d6cff";
 const CHART_SURFACE = "#12142a";
 
@@ -140,10 +143,44 @@ function authFetch(url, options = {}) {
       ...options.headers,
       ...authHeaders(),
     },
+  }).then((res) => {
+    if (res.status === 401) {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("username");
+      window.dispatchEvent(new Event("auth:expired"));
+    }
+    return res;
   });
 }
 
 // ---------- Hooks ----------
+
+function useHoldToReveal() {
+  const [visible, setVisible] = useState(false);
+  const show = () => setVisible(true);
+  const hide = () => setVisible(false);
+
+  return {
+    visible,
+    handlers: {
+      onMouseDown: show,
+      onMouseUp: hide,
+      onMouseLeave: hide,
+      onTouchStart: show,
+      onTouchEnd: hide,
+      onTouchCancel: hide,
+      onKeyDown: (e) => {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          show();
+        }
+      },
+      onKeyUp: (e) => {
+        if (e.key === " " || e.key === "Enter") hide();
+      },
+    },
+  };
+}
 
 function useCountUp(value, duration = 600) {
   const [display, setDisplay] = useState(value ?? 0);
@@ -206,17 +243,58 @@ function PerformanceTooltip({ active, payload, label, valueLabel = "Portfolio va
 
 // ---------- Auth screen ----------
 
-function AuthScreen({ onAuth }) {
+function EyeIcon({ off }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+      <circle cx="12" cy="12" r="3" />
+      {off && <line x1="2" y1="2" x2="22" y2="22" />}
+    </svg>
+  );
+}
+
+function AuthScreen({ onAuth, sessionExpired }) {
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const passwordReveal = useHoldToReveal();
+  const confirmReveal = useHoldToReveal();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [capsLockOn, setCapsLockOn] = useState(false);
+  const loginTabRef = useRef(null);
+  const signupTabRef = useRef(null);
 
   const isLogin = mode === "login";
+  const passwordsMismatch = !isLogin && confirmPassword.length > 0 && password !== confirmPassword;
+
+  const checkCapsLock = (e) => {
+    if (typeof e.getModifierState === "function") {
+      setCapsLockOn(e.getModifierState("CapsLock"));
+    }
+  };
+
+  const switchMode = (nextMode) => {
+    setMode(nextMode);
+    setError(null);
+    setConfirmPassword("");
+  };
+
+  const handleTabKeyDown = (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const nextMode = isLogin ? "signup" : "login";
+    switchMode(nextMode);
+    (nextMode === "login" ? loginTabRef : signupTabRef).current?.focus();
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (passwordsMismatch) {
+      setError("Passwords don't match.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
 
@@ -252,30 +330,40 @@ function AuthScreen({ onAuth }) {
           <p>Track your investments in one place</p>
         </div>
 
+        {sessionExpired && (
+          <p className="auth-notice" role="status">Your session expired — please sign in again.</p>
+        )}
+
         <div className="auth-tabs" role="tablist">
           <button
+            ref={loginTabRef}
             id="tab-login"
             role="tab"
             type="button"
+            tabIndex={isLogin ? 0 : -1}
             aria-selected={isLogin}
             className={isLogin ? "active" : ""}
-            onClick={() => { setMode("login"); setError(null); }}
+            onClick={() => switchMode("login")}
+            onKeyDown={handleTabKeyDown}
           >
             Sign in
           </button>
           <button
+            ref={signupTabRef}
             id="tab-signup"
             role="tab"
             type="button"
+            tabIndex={!isLogin ? 0 : -1}
             aria-selected={!isLogin}
             className={!isLogin ? "active" : ""}
-            onClick={() => { setMode("signup"); setError(null); }}
+            onClick={() => switchMode("signup")}
+            onKeyDown={handleTabKeyDown}
           >
             Create account
           </button>
         </div>
 
-        <form className="auth-form" onSubmit={handleSubmit} aria-labelledby={isLogin ? "tab-login" : "tab-signup"}>
+        <form className="auth-form" onSubmit={handleSubmit} aria-labelledby={isLogin ? "tab-login" : "tab-signup"} noValidate>
           <div className="auth-field">
             <label htmlFor="auth-username">Username</label>
             <input
@@ -283,24 +371,84 @@ function AuthScreen({ onAuth }) {
               type="text"
               placeholder="Enter your username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => { setUsername(e.target.value); setError(null); }}
               autoComplete="username"
+              autoFocus
+              minLength={isLogin ? undefined : MIN_USERNAME_LENGTH}
               required
             />
+            {!isLogin && (
+              <p className={`auth-hint ${username.length >= MIN_USERNAME_LENGTH ? "met" : ""}`}>
+                {username.length >= MIN_USERNAME_LENGTH ? "✓" : "•"} At least {MIN_USERNAME_LENGTH} characters
+              </p>
+            )}
           </div>
 
           <div className="auth-field">
             <label htmlFor="auth-password">Password</label>
-            <input
-              id="auth-password"
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={isLogin ? "current-password" : "new-password"}
-              required
-            />
+            <div className="auth-password-wrapper">
+              <input
+                id="auth-password"
+                type={passwordReveal.visible ? "text" : "password"}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(null); }}
+                onKeyDown={checkCapsLock}
+                onKeyUp={checkCapsLock}
+                onBlur={() => setCapsLockOn(false)}
+                autoComplete={isLogin ? "current-password" : "new-password"}
+                minLength={isLogin ? undefined : MIN_PASSWORD_LENGTH}
+                required
+              />
+              <button
+                type="button"
+                className="auth-password-toggle"
+                {...passwordReveal.handlers}
+                aria-label="Press and hold to show password"
+              >
+                <EyeIcon off={!passwordReveal.visible} />
+              </button>
+            </div>
+            {capsLockOn && <p className="auth-hint mismatch">⚠ Caps Lock is on</p>}
+            {!isLogin && (
+              <p className={`auth-hint ${password.length >= MIN_PASSWORD_LENGTH ? "met" : ""}`}>
+                {password.length >= MIN_PASSWORD_LENGTH ? "✓" : "•"} At least {MIN_PASSWORD_LENGTH} characters
+              </p>
+            )}
           </div>
+
+          {!isLogin && (
+            <div className="auth-field">
+              <label htmlFor="auth-confirm-password">Confirm password</label>
+              <div className="auth-password-wrapper">
+                <input
+                  id="auth-confirm-password"
+                  type={confirmReveal.visible ? "text" : "password"}
+                  placeholder="Re-enter your password"
+                  value={confirmPassword}
+                  onChange={(e) => { setConfirmPassword(e.target.value); setError(null); }}
+                  onKeyDown={checkCapsLock}
+                  onKeyUp={checkCapsLock}
+                  onBlur={() => setCapsLockOn(false)}
+                  autoComplete="new-password"
+                  required
+                />
+                <button
+                  type="button"
+                  className="auth-password-toggle"
+                  {...confirmReveal.handlers}
+                  aria-label="Press and hold to show password"
+                >
+                  <EyeIcon off={!confirmReveal.visible} />
+                </button>
+              </div>
+              {confirmPassword.length > 0 && (
+                <p className={`auth-hint ${passwordsMismatch ? "mismatch" : "met"}`}>
+                  {passwordsMismatch ? "✕ Passwords don't match" : "✓ Passwords match"}
+                </p>
+              )}
+            </div>
+          )}
 
           {error && <p className="auth-error" role="alert">{error}</p>}
 
@@ -308,7 +456,17 @@ function AuthScreen({ onAuth }) {
             id="auth-submit"
             type="submit"
             className="auth-submit"
-            disabled={submitting || !username || !password}
+            disabled={
+              submitting ||
+              !username ||
+              !password ||
+              (!isLogin && (
+                username.length < MIN_USERNAME_LENGTH ||
+                password.length < MIN_PASSWORD_LENGTH ||
+                !confirmPassword ||
+                passwordsMismatch
+              ))
+            }
           >
             {submitting ? "Please wait…" : isLogin ? "Sign in" : "Create account"}
           </button>
@@ -323,9 +481,22 @@ function AuthScreen({ onAuth }) {
 function App() {
   // Auth state — seeded from localStorage so a page refresh stays logged in
   const [username, setUsername] = useState(() => localStorage.getItem("username") ?? null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const isLoggedIn = !!getToken() && !!username;
 
-  const handleAuth = (uname) => setUsername(uname);
+  useEffect(() => {
+    const handleExpired = () => {
+      setUsername(null);
+      setSessionExpired(true);
+    };
+    window.addEventListener("auth:expired", handleExpired);
+    return () => window.removeEventListener("auth:expired", handleExpired);
+  }, []);
+
+  const handleAuth = (uname) => {
+    setSessionExpired(false);
+    setUsername(uname);
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("access_token");
@@ -334,7 +505,7 @@ function App() {
   };
 
   if (!isLoggedIn) {
-    return <AuthScreen onAuth={handleAuth} />;
+    return <AuthScreen onAuth={handleAuth} sessionExpired={sessionExpired} />;
   }
 
   return <Dashboard username={username} onLogout={handleLogout} />;

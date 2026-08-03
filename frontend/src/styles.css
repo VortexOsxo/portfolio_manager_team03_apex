@@ -1300,6 +1300,53 @@
   color: var(--text-faint);
 }
 
+.auth-password-wrapper {
+  position: relative;
+  display: flex;
+}
+
+.auth-password-wrapper input {
+  flex: 1;
+  padding-right: 42px;
+}
+
+.auth-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.auth-password-toggle:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.auth-hint {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  margin: 0;
+  transition: color 0.15s ease;
+}
+
+.auth-hint.met {
+  color: var(--positive);
+}
+
+.auth-hint.mismatch {
+  color: var(--negative);
+}
+
 .auth-error {
   font-size: 0.82rem;
   color: var(--negative);
@@ -1308,6 +1355,16 @@
   border-radius: 8px;
   padding: 8px 12px;
   margin: 0;
+}
+
+.auth-notice {
+  font-size: 0.82rem;
+  color: var(--accent-solid);
+  background: rgba(109, 108, 255, 0.1);
+  border: 1px solid rgba(109, 108, 255, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 16px;
 }
 
 .auth-submit {
