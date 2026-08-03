@@ -92,6 +92,29 @@ const getPerformanceDates = (rangeLabel) => {
   return { startDate: toApiDate(start), endDate: toApiDate(end) };
 };
 
+// ---------- Auth helpers ----------
+
+function getToken() {
+  return localStorage.getItem("access_token");
+}
+
+function authHeaders() {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function authFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      ...authHeaders(),
+    },
+  });
+}
+
+// ---------- Hooks ----------
+
 function useCountUp(value, duration = 600) {
   const [display, setDisplay] = useState(value ?? 0);
   const prevRef = useRef(value ?? 0);
@@ -121,6 +144,8 @@ function useCountUp(value, duration = 600) {
   return value == null ? null : display;
 }
 
+// ---------- Small components ----------
+
 function TrendArrow({ value }) {
   if (!value) return null;
   const up = value > 0;
@@ -149,7 +174,145 @@ function PerformanceTooltip({ active, payload, label, valueLabel = "Portfolio va
   );
 }
 
+// ---------- Auth screen ----------
+
+function AuthScreen({ onAuth }) {
+  const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  const isLogin = mode === "login";
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+
+    const endpoint = isLogin ? "/api/accounts/login" : "/api/accounts/signup";
+
+    fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    })
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+        return body;
+      })
+      .then((data) => {
+        localStorage.setItem("access_token", data.access_token);
+        localStorage.setItem("username", data.username);
+        onAuth(data.username);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setSubmitting(false));
+  };
+
+  return (
+    <div className="auth-screen">
+      <div className="grain-overlay" aria-hidden="true" />
+
+      <div className="auth-card">
+        <div className="auth-brand">
+          <img className="brand-mark" src="/logo.png" alt="" aria-hidden="true" />
+          <h1>Portfolio Manager</h1>
+          <p>Track your investments in one place</p>
+        </div>
+
+        <div className="auth-tabs" role="tablist">
+          <button
+            id="tab-login"
+            role="tab"
+            type="button"
+            aria-selected={isLogin}
+            className={isLogin ? "active" : ""}
+            onClick={() => { setMode("login"); setError(null); }}
+          >
+            Sign in
+          </button>
+          <button
+            id="tab-signup"
+            role="tab"
+            type="button"
+            aria-selected={!isLogin}
+            className={!isLogin ? "active" : ""}
+            onClick={() => { setMode("signup"); setError(null); }}
+          >
+            Create account
+          </button>
+        </div>
+
+        <form className="auth-form" onSubmit={handleSubmit} aria-labelledby={isLogin ? "tab-login" : "tab-signup"}>
+          <div className="auth-field">
+            <label htmlFor="auth-username">Username</label>
+            <input
+              id="auth-username"
+              type="text"
+              placeholder="Enter your username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+            />
+          </div>
+
+          <div className="auth-field">
+            <label htmlFor="auth-password">Password</label>
+            <input
+              id="auth-password"
+              type="password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={isLogin ? "current-password" : "new-password"}
+              required
+            />
+          </div>
+
+          {error && <p className="auth-error" role="alert">{error}</p>}
+
+          <button
+            id="auth-submit"
+            type="submit"
+            className="auth-submit"
+            disabled={submitting || !username || !password}
+          >
+            {submitting ? "Please wait…" : isLogin ? "Sign in" : "Create account"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Main App ----------
+
 function App() {
+  // Auth state — seeded from localStorage so a page refresh stays logged in
+  const [username, setUsername] = useState(() => localStorage.getItem("username") ?? null);
+  const isLoggedIn = !!getToken() && !!username;
+
+  const handleAuth = (uname) => setUsername(uname);
+
+  const handleLogout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("username");
+    setUsername(null);
+  };
+
+  if (!isLoggedIn) {
+    return <AuthScreen onAuth={handleAuth} />;
+  }
+
+  return <Dashboard username={username} onLogout={handleLogout} />;
+}
+
+// ---------- Dashboard (previously the App body) ----------
+
+function Dashboard({ username, onLogout }) {
   const [activeView, setActiveView] = useState("overview");
   const [holdings, setHoldings] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -192,11 +355,11 @@ function App() {
     setLoading(true);
     setError(null);
     Promise.all([
-      fetch("/api/stocks/").then((res) => {
+      authFetch("/api/stocks/").then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         return res.json();
       }),
-      fetch("/api/stocks/summary").then((res) => {
+      authFetch("/api/stocks/summary").then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         return res.json();
       }),
@@ -232,7 +395,7 @@ function App() {
     setPerformanceLoading(true);
     setPerformanceError(null);
 
-    fetch(`/api/stocks/performance?start_date=${startDate}&end_date=${endDate}`, {
+    authFetch(`/api/stocks/performance?start_date=${startDate}&end_date=${endDate}`, {
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -271,7 +434,7 @@ function App() {
     }
 
     const handle = setTimeout(() => {
-      fetch(`/api/stocks/search?q=${encodeURIComponent(ticker)}`)
+      authFetch(`/api/stocks/search?q=${encodeURIComponent(ticker)}`)
         .then((res) => (res.ok ? res.json() : []))
         .then((data) => setTickerResults(data))
         .catch(() => setTickerResults([]));
@@ -337,7 +500,7 @@ function App() {
     setTradeError(null);
     setSubmitting(true);
 
-    fetch(`/api/stocks/${tradeType}`, {
+    authFetch(`/api/stocks/${tradeType}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ticker: ticker.toUpperCase(), amount: Number(amount) }),
@@ -365,7 +528,7 @@ function App() {
     setHistoryPerformance([]);
     setHistoryPerformanceLoading(true);
 
-    fetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
+    authFetch(`/api/transactions/?ticker=${encodeURIComponent(tickerSymbol)}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
         return res.json();
@@ -375,7 +538,7 @@ function App() {
       .finally(() => setHistoryLoading(false));
 
     const { startDate, endDate } = getPerformanceDates("3M");
-    fetch(`/api/stocks/performance/${encodeURIComponent(tickerSymbol)}?start_date=${startDate}&end_date=${endDate}`)
+    authFetch(`/api/stocks/performance/${encodeURIComponent(tickerSymbol)}?start_date=${startDate}&end_date=${endDate}`)
       .then((res) => (res.ok ? res.json() : { dates: [], equity: [] }))
       .then((data) => {
         const dates = Array.isArray(data.dates) ? data.dates : [];
@@ -400,6 +563,11 @@ function App() {
       setModalClosing(false);
     }, 180);
   };
+
+  // Initials from username for the avatar
+  const avatarLabel = username
+    ? username.slice(0, 2).toUpperCase()
+    : "??";
 
   return (
     <div className="app-shell">
@@ -429,8 +597,19 @@ function App() {
             Performance
           </button>
 
-          <div className="avatar" aria-label="Eduardo profile">
-            EP
+          <div className="nav-user">
+            <div className="avatar" aria-label={`${username} profile`} title={username}>
+              {avatarLabel}
+            </div>
+            <button
+              id="logout-btn"
+              type="button"
+              className="logout-btn"
+              onClick={onLogout}
+              title="Sign out"
+            >
+              Sign out
+            </button>
           </div>
         </nav>
       </header>
