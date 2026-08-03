@@ -5,6 +5,8 @@ USE portfolio_db;
 
 CREATE TABLE `accounts` (
   `id` int AUTO_INCREMENT,
+  `username` varchar(50) UNIQUE NOT NULL,
+  `password` varchar(20) NOT NULL,
   `balance` decimal(15,2) NOT NULL,
   PRIMARY KEY (`id`)
 );

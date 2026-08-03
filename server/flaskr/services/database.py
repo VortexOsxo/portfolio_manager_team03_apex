@@ -312,3 +312,27 @@ def get_stock_performance(ticker, start_date, end_date):
         stock_dates.append(date)
         equity.append(ticker_values[date])
     return stock_dates, equity
+
+def create_user(username, password):
+    try:
+        query = "INSERT INTO accounts (username, password, balance) VALUES (%s, %s, %s);"
+        params = (username, password, 30000)
+
+        write_query(query, params)
+        return True
+    except Exception:
+        return False
+
+def get_user(username):
+    query = "SELECT id, username, password, balance from accounts WHERE username = %s LIMIT 1;"
+    params = (username,)
+    result = read_query(query, params)
+    if len(result) == 0:
+        return None
+
+    return {
+        'id': result[0][0],
+        'username': result[0][1],
+        'password': result[0][2],
+        'balance': result[0][3],
+    }
