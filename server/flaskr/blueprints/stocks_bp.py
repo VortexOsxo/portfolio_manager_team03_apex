@@ -1,4 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from decimal import InvalidOperation
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -16,6 +18,24 @@ stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
 _MAX_INFO_WORKERS = 10
 
 
+def _parse_date_range(start_date, end_date):
+    """Validate start_date/end_date are well-formed "YYYY-MM-DD" strings
+    with start_date on or before end_date.
+
+    Returns None on success, or an error message string.
+    """
+    try:
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        return "start_date and end_date must be in YYYY-MM-DD format"
+
+    if start > end:
+        return "start_date must not be after end_date"
+
+    return None
+
+
 @stocks_bp.get("/search")
 def search_stocks_route():
     query = request.args.get("q", "")
@@ -25,7 +45,10 @@ def search_stocks_route():
 @stocks_bp.get("/quote/<string:ticker>")
 def get_quote(ticker):
     """Live price + company name for any ticker, owned or not. """
-    info = YahooFinanceStock(ticker.upper()).get_info()
+    try:
+        info = YahooFinanceStock(ticker.upper()).get_info()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     if info["company_name"] is None:
         return jsonify({"error": f'No quote found for "{ticker}"'}), 404
     return jsonify(info), 200
@@ -85,7 +108,10 @@ def _build_holdings(account_id):
 @jwt_required()
 def get_stocks():
     account_id = int(get_jwt_identity())
-    holdings, _ = _build_holdings(account_id)
+    try:
+        holdings, _ = _build_holdings(account_id)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     return jsonify(holdings), 200
 
 
@@ -93,26 +119,30 @@ def get_stocks():
 @jwt_required()
 def get_summary():
     account_id = int(get_jwt_identity())
-    holdings, realized = _build_holdings(account_id)
+    try:
+        holdings, realized = _build_holdings(account_id)
 
-    total_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
-    total_cost_basis = sum(
-        h['avg_cost'] * h['amount'] for h in holdings.values() if h['avg_cost'] is not None
-    )
-    total_unrealized_pnl = sum(
-        h['unrealized_pnl'] for h in holdings.values() if h['unrealized_pnl'] is not None
-    )
-    total_day_change = sum(
-        h['day_change'] for h in holdings.values() if h['day_change'] is not None
-    )
-    total_realized_pnl = sum(realized.values())
-    realized_lots = sorted(
-        performance.compute_realized_lots(get_transactions(account_id)),
-        key=lambda lot: lot['date'],
-        reverse=True,
-    )
+        total_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
+        total_cost_basis = sum(
+            h['avg_cost'] * h['amount'] for h in holdings.values() if h['avg_cost'] is not None
+        )
+        total_unrealized_pnl = sum(
+            h['unrealized_pnl'] for h in holdings.values() if h['unrealized_pnl'] is not None
+        )
+        total_day_change = sum(
+            h['day_change'] for h in holdings.values() if h['day_change'] is not None
+        )
+        total_realized_pnl = sum(realized.values())
+        realized_lots = sorted(
+            performance.compute_realized_lots(get_transactions(account_id)),
+            key=lambda lot: lot['date'],
+            reverse=True,
+        )
 
-    cash_balance = get_account_balance(account_id)
+        cash_balance = get_account_balance(account_id)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
     net_worth = total_value + float(cash_balance)
 
     prior_value = total_value - total_day_change
@@ -144,6 +174,10 @@ def get_performance():
     if not start_date or not end_date:
         return jsonify({"error": "start_date and end_date query parameters are required"}), 400
 
+    date_error = _parse_date_range(start_date, end_date)
+    if date_error:
+        return jsonify({"error": date_error}), 400
+
     try:
         dates, equity, cash = get_portfolio_performance(account_id, start_date, end_date)
     except Exception as e:
@@ -153,24 +187,22 @@ def get_performance():
 
 @stocks_bp.get("/performance/<string:ticker>")
 def get_stock_performance_route(ticker):
-    print('Received request for stock performance:', ticker)
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date query parameters are required"}), 400
+
+    date_error = _parse_date_range(start_date, end_date)
+    if date_error:
+        return jsonify({"error": date_error}), 400
+
     try:
-        start_date = request.args.get("start_date")
-        end_date = request.args.get("end_date")
-
-        if not start_date or not end_date:
-            return jsonify({"error": "start_date and end_date query parameters are required"}), 400
-
-        try:
-            dates, equity = get_stock_performance(ticker, start_date, end_date)
-        except Exception as e:
-            print(e)
-            return jsonify({"error": str(e)}), 500
-
-        return jsonify({"dates": dates, "equity": equity}), 200
+        dates, equity = get_stock_performance(ticker, start_date, end_date)
     except Exception as e:
-        print(f"Error occurred: {e}")
-        return "", 400
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"dates": dates, "equity": equity}), 200
 
 
 @stocks_bp.post("/buy")
@@ -190,6 +222,8 @@ def buy_stock():
         buy_holding(account_id, ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError:
         return "", 400
+    except InvalidOperation:
+        return jsonify({"error": "amount must be a number"}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -213,6 +247,8 @@ def sell_stock():
         sell_holding(account_id, ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError:
         return "", 400
+    except InvalidOperation:
+        return jsonify({"error": "amount must be a number"}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
