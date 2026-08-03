@@ -269,7 +269,7 @@ def get_portfolio_performance(account_id, start_date, end_date):
 
     equity_transactions = get_transactions(account_id)
     all_transactions = get_transactions(account_id, include_cash_transactions=True)
-    current_cash_balance = float(get_account_balance())
+    current_cash_balance = float(get_account_balance(account_id))
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     reconstructed_today = performance.compute_cash_balances([today], all_transactions)[0]
     cash_offset = current_cash_balance - reconstructed_today
