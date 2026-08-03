@@ -237,10 +237,6 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     if len(ticker) > 10:
         raise ValueError(f"ticker must be at most 10 characters, got {len(ticker)}")
 
-    current_amount = Decimal(str(get_holding_amount(ticker)))
-    if amount > current_amount:
-        raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
-
     if cost_basis is None:
         price_lookup_date = transaction_date if transaction_date is not None else datetime.now().date()
         cost_basis = YahooFinanceStock(ticker).get_price_on_date(price_lookup_date)
@@ -255,6 +251,18 @@ def sell_holding(ticker, amount, cost_basis=None, transaction_date=None):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        # There's no per-ticker row in this schema, so lock the same
+        # accounts row buy_holding locks before checking cash -- it
+        # doubles as the mutex that serializes concurrent sells (and
+        # buys/withdrawals) of the same ticker, so two concurrent sells
+        # can no longer both read the same current_amount and jointly
+        # oversell the position.
+        cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (1,))
+
+        current_amount = Decimal(str(get_holding_amount(ticker)))
+        if amount > current_amount:
+            raise ValueError(f"Cannot sell {amount} shares of {ticker}; only {current_amount} available")
+
         cursor.execute(
             "INSERT INTO transactions (type, ticker, amount, cost_basis, transaction_date) "
             "VALUES ('sell', %s, %s, %s, %s)",

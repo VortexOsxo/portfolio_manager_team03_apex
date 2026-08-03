@@ -294,15 +294,18 @@ class TestSellHolding:
 
         database.sell_holding("AAPL", 5, cost_basis=160.0, transaction_date=date(2024, 1, 3))
 
-        assert mock_cursor.execute.call_args_list[0][0][1] == ("AAPL", -5, 160.0, date(2024, 1, 3))
-        assert mock_cursor.execute.call_args_list[1][0][0].startswith("UPDATE accounts SET balance")
+        assert mock_cursor.execute.call_args_list[1][0][1] == ("AAPL", -5, 160.0, date(2024, 1, 3))
+        assert mock_cursor.execute.call_args_list[2][0][0].startswith("UPDATE accounts SET balance")
 
+    @patch("flaskr.services.database.get_db_connection")
     @patch("flaskr.services.database.get_holding_amount")
-    def test_raises_when_selling_more_than_owned(self, mock_get_amount):
+    def test_raises_when_selling_more_than_owned(self, mock_get_amount, mock_get_db_connection):
         mock_get_amount.return_value = 3
 
         with pytest.raises(ValueError, match="only 3 available"):
             database.sell_holding("AAPL", 5, cost_basis=160.0, transaction_date=date(2024, 1, 3))
+
+        mock_get_db_connection.return_value.rollback.assert_called_once()
 
     @patch("flaskr.services.database.get_db_connection")
     @patch("flaskr.services.database.get_holding_amount")
@@ -325,24 +328,23 @@ class TestSellHolding:
         database.sell_holding("AAPL", 5, transaction_date=date(2024, 1, 3))
 
         mock_stock_cls.return_value.get_price_on_date.assert_called_once_with(date(2024, 1, 3))
-        assert mock_cursor.execute.call_args_list[0][0][1] == ("AAPL", -5, 180.0, date(2024, 1, 3))
+        assert mock_cursor.execute.call_args_list[1][0][1] == ("AAPL", -5, 180.0, date(2024, 1, 3))
 
     @patch("flaskr.services.database.get_db_connection")
     @patch("flaskr.services.database.get_holding_amount")
-    def test_does_not_lock_the_holdings_row_unlike_buy_holding(self, mock_get_amount, mock_get_db_connection):
-        # buy_holding takes a "SELECT ... FOR UPDATE" lock before checking
-        # cash balance; sell_holding has no equivalent lock on the shares
-        # check, so two concurrent sells could both read the same
-        # current_amount and both pass the "not selling more than owned"
-        # check, overselling the position. This documents the gap rather
-        # than fixing it.
+    def test_locks_the_accounts_row_before_checking_shares_owned(self, mock_get_amount, mock_get_db_connection):
+        # buy_holding and withdraw_cash both lock the accounts row before
+        # their balance checks; sell_holding now takes the same lock before
+        # calling get_holding_amount, so two concurrent sells of the same
+        # ticker can no longer both read the same current_amount and
+        # jointly oversell the position -- the second blocks until the
+        # first's transaction commits.
         mock_get_amount.return_value = 10
         mock_cursor = mock_get_db_connection.return_value.cursor.return_value
 
         database.sell_holding("AAPL", 5, cost_basis=100, transaction_date=date(2024, 1, 1))
 
-        executed_queries = [call.args[0] for call in mock_cursor.execute.call_args_list]
-        assert not any("FOR UPDATE" in query for query in executed_queries)
-        # get_holding_amount runs via its own unlocked connection, entirely
-        # outside the transaction that performs the insert.
+        first_query = mock_cursor.execute.call_args_list[0][0][0]
+        assert "FOR UPDATE" in first_query
+        # get_holding_amount is called only after the lock is acquired.
         mock_get_amount.assert_called_once_with("AAPL")
