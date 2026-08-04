@@ -6,7 +6,7 @@ import mysql
 
 from flaskr.services.database import (
     get_stock_performance, get_transactions, buy_holding, sell_holding,
-    get_portfolio_performance, get_account_balance, deposit_cash, withdraw_cash,
+    get_portfolio_performance, get_account_balance
 )
 from flaskr.services import performance
 from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
@@ -23,62 +23,11 @@ def search_stocks_route():
 
 
 @stocks_bp.get("/quote/<string:ticker>")
-def get_quote(ticker):
-    """Live price + company name for any ticker, owned or not. """
+def get_ticker_info(ticker):
     info = YahooFinanceStock(ticker.upper()).get_info()
     if info["company_name"] is None:
         return jsonify({"error": f'No quote found for "{ticker}"'}), 404
     return jsonify(info), 200
-
-
-def _build_holdings(account_id):
-    """Group transactions by ticker"""
-    transactions = get_transactions(account_id)
-
-    amounts = {}
-    for tx in transactions:
-        ticker = tx['ticker']
-        amounts[ticker] = amounts.get(ticker, 0) + float(tx['amount'])
-    amounts = {ticker: amount for ticker, amount in amounts.items() if amount != 0}
-
-    avg_costs, realized = performance.compute_positions(transactions)
-
-    # get_info() has no batch equivalent, so fetch each held ticker's quote concurrently instead of one network round trip
-    tickers = list(amounts.keys())
-    with ThreadPoolExecutor(max_workers=min(len(tickers), _MAX_INFO_WORKERS) or 1) as executor:
-        infos = dict(zip(tickers, executor.map(lambda t: YahooFinanceStock(t).get_info(), tickers)))
-
-    holdings = {}
-    for ticker, amount in amounts.items():
-        info = infos[ticker]
-        current_price = info["current_price"]
-        avg_cost = avg_costs.get(ticker)
-
-        pnl = performance.unrealized_pnl(amount, avg_cost, current_price)
-        change = performance.day_change(amount, info["day_change"], info["day_change_pct"])
-
-        holdings[ticker] = {
-            'ticker': ticker,
-            'name': info["company_name"],
-            'amount': amount,
-            'current_price': current_price,
-            'value': round(amount * current_price, 2) if current_price is not None else None,
-            'avg_cost': avg_cost,
-            'unrealized_pnl': pnl["pnl"],
-            'unrealized_pnl_pct': pnl["pnl_pct"],
-            'day_change': change["value"],
-            'day_change_pct': change["pct"],
-        }
-
-    total_holdings_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
-    for h in holdings.values():
-        h['pct_of_portfolio'] = (
-            round(h['value'] / total_holdings_value * 100, 2)
-            if h['value'] is not None and total_holdings_value
-            else None
-        )
-
-    return holdings, realized
 
 
 @stocks_bp.get("/")
@@ -153,7 +102,6 @@ def get_performance():
 
 @stocks_bp.get("/performance/<string:ticker>")
 def get_stock_performance_route(ticker):
-    print('Received request for stock performance:', ticker)
     try:
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
@@ -164,56 +112,87 @@ def get_stock_performance_route(ticker):
         try:
             dates, equity = get_stock_performance(ticker, start_date, end_date)
         except Exception as e:
-            print(e)
             return jsonify({"error": str(e)}), 500
 
         return jsonify({"dates": dates, "equity": equity}), 200
     except Exception as e:
-        print(f"Error occurred: {e}")
         return "", 400
 
 
 @stocks_bp.post("/buy")
 @jwt_required()
 def buy_stock():
-    account_id = int(get_jwt_identity())
-    data = request.get_json()
-    ticker = data.get("ticker")
-    amount = data.get("amount")
-
-    if ticker is None or amount is None:
-        return "", 400
-
-    cost_basis = data.get("cost_basis")
-    transaction_date = data.get("transaction_date")
-    try:
-        buy_holding(account_id, ticker, amount, cost_basis, transaction_date)
-    except mysql.connector.errors.IntegrityError:
-        return "", 400
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
-    return jsonify({"message": "Stock bought successfully"}), 201
+    return _trade_action(buy_holding, "bought")
 
 
 @stocks_bp.post("/sell")
 @jwt_required()
 def sell_stock():
+    return _trade_action(sell_holding, "sold")
+
+def _trade_action(trade_fn, trade_verb):
     account_id = int(get_jwt_identity())
-    data = request.get_json()
+    data = request.get_json() or {}
     ticker = data.get("ticker")
     amount = data.get("amount")
 
-    if ticker is None or amount is None:
+    if ticker is None or amount is None or float(amount) <= 0:
         return "", 400
 
     cost_basis = data.get("cost_basis")
     transaction_date = data.get("transaction_date")
     try:
-        sell_holding(account_id, ticker, amount, cost_basis, transaction_date)
+        trade_fn(account_id, ticker, amount, cost_basis, transaction_date)
     except mysql.connector.errors.IntegrityError:
         return "", 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    return jsonify({"message": "Stock sold successfully"}), 201
+    return jsonify({"message": f"Stock {trade_verb} successfully"}), 201
+
+def _build_holdings(account_id):
+    transactions = get_transactions(account_id)
+
+    amounts = {}
+    for tx in transactions:
+        ticker = tx['ticker']
+        amounts[ticker] = amounts.get(ticker, 0) + float(tx['amount'])
+    amounts = {ticker: amount for ticker, amount in amounts.items() if amount != 0}
+
+    avg_costs, realized = performance.compute_positions(transactions)
+
+    tickers = list(amounts.keys())
+    with ThreadPoolExecutor(max_workers=min(len(tickers), _MAX_INFO_WORKERS) or 1) as executor:
+        infos = dict(zip(tickers, executor.map(lambda t: YahooFinanceStock(t).get_info(), tickers)))
+
+    holdings = {}
+    for ticker, amount in amounts.items():
+        info = infos[ticker]
+        current_price = info["current_price"]
+        avg_cost = avg_costs.get(ticker)
+
+        pnl = performance.unrealized_pnl(amount, avg_cost, current_price)
+        change = performance.day_change(amount, info["day_change"], info["day_change_pct"])
+
+        holdings[ticker] = {
+            'ticker': ticker,
+            'name': info["company_name"],
+            'amount': amount,
+            'current_price': current_price,
+            'value': round(amount * current_price, 2) if current_price is not None else None,
+            'avg_cost': avg_cost,
+            'unrealized_pnl': pnl["pnl"],
+            'unrealized_pnl_pct': pnl["pnl_pct"],
+            'day_change': change["value"],
+            'day_change_pct': change["pct"],
+        }
+
+    total_holdings_value = sum(h['value'] for h in holdings.values() if h['value'] is not None)
+    for h in holdings.values():
+        h['pct_of_portfolio'] = (
+            round(h['value'] / total_holdings_value * 100, 2)
+            if h['value'] is not None and total_holdings_value
+            else None
+        )
+
+    return holdings, realized
