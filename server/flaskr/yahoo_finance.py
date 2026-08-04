@@ -31,14 +31,7 @@ class YahooFinanceStock:
         return default
 
     def get_info(self):
-        """Company name, current price and today's change, straight from Yahoo Finance.
-
-        Cached for a short TTL across requests/instances (keyed by ticker) since
-        this gets called repeatedly for the same tickers in quick succession.
-
-        Add more fields here as new features need them, e.g.:
-        "sector": self.get_field("sector"),
-        """
+        """Company name, current price and today's change, straight from Yahoo Finance."""
         cached = _INFO_CACHE.get(self.ticker)
         if cached is not None and time.time() - cached[1] < _INFO_CACHE_TTL_SECONDS:
             return cached[0]

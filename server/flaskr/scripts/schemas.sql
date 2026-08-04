@@ -7,6 +7,8 @@ CREATE TABLE `accounts` (
   `id` int AUTO_INCREMENT,
   `username` varchar(50) UNIQUE NOT NULL,
   `password` varchar(255) NOT NULL,
+  `first_name` varchar(50) NOT NULL,
+  `last_name` varchar(50) NOT NULL,
   `balance` decimal(15,2) NOT NULL,
   PRIMARY KEY (`id`)
 );
