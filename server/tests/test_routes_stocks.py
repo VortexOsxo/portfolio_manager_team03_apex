@@ -2,7 +2,6 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import mysql.connector.errors
-import pandas as pd
 import pytest
 
 from flaskr.services import database
@@ -87,12 +86,9 @@ class TestGetHoldingsRoute:
         assert response.get_json() == {}
 
     @patch("flaskr.blueprints.stocks_bp.get_transactions")
-    def test_yahoo_failure_surfaces_as_a_bare_500_not_a_json_error(
+    def test_yahoo_failure_returns_500_with_json_error(
         self, mock_get_transactions, client, mock_yahoo
     ):
-        # _build_holdings has no try/except around the Yahoo call, unlike the
-        # JSON-error pattern used by /stocks/performance. Documents current
-        # behavior, doesn't fix it.
         mock_get_transactions.return_value = [
             {"tr_id": 1, "ticker": "AAPL", "amount": 10, "cost_basis": 100.0, "transaction_date": "2026-01-01"},
         ]
@@ -101,7 +97,37 @@ class TestGetHoldingsRoute:
         response = client.get("/stocks/")
 
         assert response.status_code == 500
-        assert response.get_json() is None  # HTML error page, not a JSON envelope
+        assert response.get_json() == {"error": "yahoo down"}
+
+
+class TestGetQuoteRoute:
+    def test_returns_the_quote_for_any_ticker(self, client, mock_yahoo):
+        response = client.get("/stocks/quote/AAPL")
+
+        assert response.status_code == 200
+        assert response.get_json()["company_name"] == "Apple Inc."
+
+    def test_unknown_ticker_returns_404(self, client, mock_yahoo):
+        mock_yahoo.return_value.get_info.return_value = {
+            "stock_ticker": "NOTREAL",
+            "company_name": None,
+            "current_price": None,
+            "day_change": None,
+            "day_change_pct": None,
+        }
+
+        response = client.get("/stocks/quote/NOTREAL")
+
+        assert response.status_code == 404
+        assert response.get_json() == {"error": 'No quote found for "NOTREAL"'}
+
+    def test_yahoo_failure_returns_500_with_json_error(self, client, mock_yahoo):
+        mock_yahoo.return_value.get_info.side_effect = RuntimeError("yahoo down")
+
+        response = client.get("/stocks/quote/AAPL")
+
+        assert response.status_code == 500
+        assert response.get_json() == {"error": "yahoo down"}
 
 
 class TestGetSummaryRoute:
@@ -123,18 +149,16 @@ class TestGetSummaryRoute:
 
     @patch("flaskr.blueprints.stocks_bp.get_account_balance")
     @patch("flaskr.blueprints.stocks_bp.get_transactions")
-    def test_missing_account_surfaces_as_a_bare_500_not_a_json_error(
+    def test_missing_account_returns_500_with_json_error(
         self, mock_get_transactions, mock_get_balance, client
     ):
-        # Same gap as GET /stocks/: no try/except around get_account_balance,
-        # unlike /stocks/buy and /sell, which do catch ValueError cleanly.
         mock_get_transactions.return_value = []
         mock_get_balance.side_effect = ValueError(f"Account {ACCOUNT_ID} not found")
 
         response = client.get("/stocks/summary")
 
         assert response.status_code == 500
-        assert response.get_json() is None
+        assert response.get_json() == {"error": f"Account {ACCOUNT_ID} not found"}
 
 
 class TestPerformanceRoute:
@@ -164,21 +188,20 @@ class TestPerformanceRoute:
         assert response.get_json()["equity"] == [200.0]
         assert "cash" in response.get_json()
 
-    @patch("flaskr.services.database.get_account_balance")
-    @patch("flaskr.services.database.get_transactions")
-    def test_malformed_date_returns_500_with_a_json_error(self, mock_get_transactions, mock_get_account_balance, client):
-        # No date-format validation before the string reaches
-        # datetime.strptime deep inside YahooFinanceStock -- it raises, and
-        # the route's blanket except turns it into a 500 (not a 400).
-        mock_get_account_balance.return_value = Decimal("30000.00")
-        mock_get_transactions.return_value = [
-            {"tr_id": 1, "type": "buy", "ticker": "AAPL", "amount": 2, "cost_basis": 100.0, "transaction_date": "2026-01-02"},
-        ]
-
+    def test_malformed_date_returns_400(self, client):
+        # _parse_date_range now rejects this before get_portfolio_performance
+        # is ever called, instead of letting a strptime failure deep inside
+        # YahooFinanceStock surface as a 500.
         response = client.get("/stocks/performance?start_date=2026-01-01&end_date=not-a-date")
 
-        assert response.status_code == 500
-        assert "does not match format" in response.get_json()["error"]
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date and end_date must be in YYYY-MM-DD format"}
+
+    def test_reversed_range_returns_400(self, client):
+        response = client.get("/stocks/performance?start_date=2026-01-10&end_date=2026-01-01")
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date must not be after end_date"}
 
 
 class TestSingleTickerPerformanceRoute:
@@ -198,27 +221,22 @@ class TestSingleTickerPerformanceRoute:
         assert response.status_code == 200
         assert response.get_json() == {"dates": ["2026-01-02"], "equity": [150.0]}
 
-    def test_malformed_date_returns_500_with_a_json_error(self, client):
-        # Unlike the portfolio-wide route, this one has a doubled/nested
-        # try/except -- but the inner except still catches this and returns
-        # the same 500 + JSON error shape, not the outer bare "" 400.
+    def test_malformed_date_returns_400(self, client):
         response = client.get("/stocks/performance/AAPL?start_date=2026-01-01&end_date=not-a-date")
 
-        assert response.status_code == 500
-        assert "does not match format" in response.get_json()["error"]
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date and end_date must be in YYYY-MM-DD format"}
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
-    def test_reversed_range_crashes_on_a_non_datetime_index(self, mock_ticker_cls, client):
-        # Real yfinance rejects start > end and comes back with an empty
-        # DataFrame carrying a plain Index rather than a DatetimeIndex, so
-        # `.strftime()` in get_market_trading_days blows up. Reproduced here
-        # without hitting the network by mocking yf.Ticker directly.
-        mock_ticker_cls.return_value.history.return_value = pd.DataFrame({"Close": []})
-
+    def test_reversed_range_returns_400(self, client):
+        # Previously this reached real yfinance, which rejects start > end
+        # by coming back with an empty DataFrame carrying a plain Index
+        # instead of a DatetimeIndex, so `.strftime()` deep in
+        # get_market_trading_days blew up into a bare-message 500.
+        # _parse_date_range now rejects the range before that code runs.
         response = client.get("/stocks/performance/AAPL?start_date=2026-01-10&end_date=2026-01-01")
 
-        assert response.status_code == 500
-        assert "has no attribute 'strftime'" in response.get_json()["error"]
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "start_date must not be after end_date"}
 
 
 class TestBuyRoute:
@@ -245,41 +263,33 @@ class TestBuyRoute:
 
         assert response.status_code == 415
 
-    def test_non_numeric_amount_crashes_with_500(self, client, mock_db_conn):
-        # decimal.InvalidOperation from Decimal(str("abc")) isn't caught by
-        # the route's except IntegrityError / except ValueError.
+    def test_non_numeric_amount_returns_400(self, client, mock_db_conn):
         response = client.post(
             "/stocks/buy", json={"ticker": "AAPL", "amount": "abc", "cost_basis": 100}
         )
 
-        assert response.status_code == 500
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be a number"}
 
-    def test_zero_amount_is_silently_accepted(self, client, mock_db_conn):
-        mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
-
+    def test_zero_amount_returns_400(self, client, mock_db_conn):
         response = client.post("/stocks/buy", json={"ticker": "AAPL", "amount": 0, "cost_basis": 100})
 
-        assert response.status_code == 201
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be greater than zero"}
 
-    def test_negative_cost_basis_is_silently_accepted(self, client, mock_db_conn):
-        mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
-
+    def test_negative_cost_basis_returns_400(self, client, mock_db_conn):
         response = client.post("/stocks/buy", json={"ticker": "AAPL", "amount": 1, "cost_basis": -50})
 
-        assert response.status_code == 201
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "cost_basis must be greater than zero"}
 
-    def test_ticker_longer_than_ten_chars_is_not_rejected_at_the_app_layer(self, client, mock_db_conn):
-        # The `transactions.ticker` column is VARCHAR(10); the app never
-        # checks length before inserting. Whether this actually errors
-        # depends on the real DB/SQL mode, which a mocked connection can't
-        # show -- this only documents that nothing stops it at this layer.
-        mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
-
+    def test_ticker_longer_than_ten_chars_returns_400(self, client, mock_db_conn):
         response = client.post(
             "/stocks/buy", json={"ticker": "WAYTOOLONGTICKER", "amount": 1, "cost_basis": 50}
         )
 
-        assert response.status_code == 201
+        assert response.status_code == 400
+        assert "at most 10 characters" in response.get_json()["error"]
 
     @patch("flaskr.blueprints.stocks_bp.buy_holding")
     def test_integrity_error_returns_400_with_empty_body(self, mock_buy, client):
@@ -336,11 +346,30 @@ class TestSellRoute:
         assert response.status_code == 400
         assert "only 3 available" in response.get_json()["error"]
 
-    def test_non_numeric_amount_crashes_with_500(self, client):
-        # Decimal(str("abc")) raises decimal.InvalidOperation before
-        # sell_holding ever touches the DB, same gap as the buy route.
+    def test_non_numeric_amount_returns_400(self, client):
         response = client.post(
             "/stocks/sell", json={"ticker": "AAPL", "amount": "abc", "cost_basis": 100}
         )
 
-        assert response.status_code == 500
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be a number"}
+
+    def test_zero_amount_returns_400(self, client):
+        response = client.post("/stocks/sell", json={"ticker": "AAPL", "amount": 0, "cost_basis": 100})
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "amount must be greater than zero"}
+
+    def test_negative_cost_basis_returns_400(self, client):
+        response = client.post("/stocks/sell", json={"ticker": "AAPL", "amount": 1, "cost_basis": -50})
+
+        assert response.status_code == 400
+        assert response.get_json() == {"error": "cost_basis must be greater than zero"}
+
+    def test_ticker_longer_than_ten_chars_returns_400(self, client):
+        response = client.post(
+            "/stocks/sell", json={"ticker": "WAYTOOLONGTICKER", "amount": 1, "cost_basis": 50}
+        )
+
+        assert response.status_code == 400
+        assert "at most 10 characters" in response.get_json()["error"]

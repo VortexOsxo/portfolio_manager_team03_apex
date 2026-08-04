@@ -11,5 +11,8 @@ transactions_bp = Blueprint("transactions", __name__, url_prefix="/transactions"
 def get_transactions_route():
     account_id = int(get_jwt_identity())
     ticker = request.args.get("ticker")
-    transactions = get_transactions(account_id, ticker=ticker)
+    try:
+        transactions = get_transactions(account_id, ticker=ticker)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     return jsonify(transactions), 200
