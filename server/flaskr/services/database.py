@@ -324,10 +324,13 @@ def get_stock_performance(ticker, start_date, end_date):
         equity.append(ticker_values[date])
     return stock_dates, equity
 
-def create_user(username, password):
+def create_user(username, password, first_name, last_name):
     try:
-        query = "INSERT INTO accounts (username, password, balance) VALUES (%s, %s, %s);"
-        params = (username, password, 0)
+        query = (
+            "INSERT INTO accounts (username, password, first_name, last_name, balance) "
+            "VALUES (%s, %s, %s, %s, %s);"
+        )
+        params = (username, password, first_name, last_name, 0)
 
         write_query(query, params)
         return True
@@ -335,7 +338,7 @@ def create_user(username, password):
         return False
 
 def get_user(username):
-    query = "SELECT id, username, password, balance from accounts WHERE username = %s LIMIT 1;"
+    query = "SELECT id, username, password, first_name, last_name, balance from accounts WHERE username = %s LIMIT 1;"
     params = (username,)
     result = read_query(query, params)
     if len(result) == 0:
@@ -345,5 +348,13 @@ def get_user(username):
         'id': result[0][0],
         'username': result[0][1],
         'password': result[0][2],
-        'balance': result[0][3],
+        'first_name': result[0][3],
+        'last_name': result[0][4],
+        'balance': result[0][5],
     }
+
+def update_account_name(account_id, first_name, last_name):
+    write_query(
+        "UPDATE accounts SET first_name = %s, last_name = %s WHERE id = %s;",
+        (first_name, last_name, account_id),
+    )

@@ -3,7 +3,7 @@ from decimal import Decimal
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
-from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_user, create_user, get_transactions
+from flaskr.services.database import get_account_balance, deposit_cash, withdraw_cash, get_user, create_user, update_account_name, get_transactions
 from werkzeug.security import check_password_hash, generate_password_hash
 
 accounts_bp = Blueprint("accounts", __name__, url_prefix="/accounts")
@@ -17,20 +17,32 @@ def signup():
     body = request.get_json()
     username = body.get('username')
     password = body.get('password')
-    if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
+    first_name = body.get('first_name')
+    last_name = body.get('last_name')
+    if not username or not password or not first_name or not last_name:
+        return jsonify({"error": "Username, password, first name, and last name required"}), 400
     if len(username) < MIN_USERNAME_LENGTH:
         return jsonify({"error": f"Choose a username with at least {MIN_USERNAME_LENGTH} characters."}), 400
     if len(password) < MIN_PASSWORD_LENGTH:
         return jsonify({"error": f"Choose a password with at least {MIN_PASSWORD_LENGTH} characters to help keep your account secure."}), 400
 
-    result = create_user(username=username, password=generate_password_hash(password))
+    result = create_user(
+        username=username,
+        password=generate_password_hash(password),
+        first_name=first_name,
+        last_name=last_name,
+    )
     if not result:
         return jsonify({"error": "Username already taken"}), 409
 
     user = get_user(username)
     access_token = create_access_token(identity=str(user['id']))
-    return jsonify({"access_token": access_token, "username": user['username']}), 201
+    return jsonify({
+        "access_token": access_token,
+        "username": user['username'],
+        "first_name": user['first_name'],
+        "last_name": user['last_name'],
+    }), 201
 
 
 @accounts_bp.post("/login")
@@ -46,7 +58,26 @@ def login():
         return jsonify({"error": "Invalid username or password"}), 401
 
     access_token = create_access_token(identity=str(user['id']))
-    return jsonify({"access_token": access_token, "username": user['username']}), 200
+    return jsonify({
+        "access_token": access_token,
+        "username": user['username'],
+        "first_name": user['first_name'],
+        "last_name": user['last_name'],
+    }), 200
+
+
+@accounts_bp.patch("/name")
+@jwt_required()
+def update_name():
+    account_id = int(get_jwt_identity())
+    body = request.get_json()
+    first_name = body.get('first_name')
+    last_name = body.get('last_name')
+    if not first_name or not last_name:
+        return jsonify({"error": "First name and last name required"}), 400
+
+    update_account_name(account_id, first_name, last_name)
+    return jsonify({"first_name": first_name, "last_name": last_name}), 200
 
 
 @accounts_bp.get("/balance")

@@ -79,6 +79,8 @@ const signClass = (value) => {
   return value > 0 ? "positive" : "negative";
 };
 
+const capitalize = (value) => (value ? value.charAt(0).toUpperCase() + value.slice(1) : value);
+
 const formatDate = (value) => {
   if (!value) return "—";
   const parsed = new Date(value);
@@ -147,6 +149,8 @@ function authFetch(url, options = {}) {
     if (res.status === 401) {
       localStorage.removeItem("access_token");
       localStorage.removeItem("username");
+      localStorage.removeItem("first_name");
+      localStorage.removeItem("last_name");
       window.dispatchEvent(new Event("auth:expired"));
     }
     return res;
@@ -255,6 +259,8 @@ function EyeIcon({ off }) {
 
 function AuthScreen({ onAuth, sessionExpired }) {
   const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -279,6 +285,8 @@ function AuthScreen({ onAuth, sessionExpired }) {
     setMode(nextMode);
     setError(null);
     setConfirmPassword("");
+    setFirstName("");
+    setLastName("");
   };
 
   const handleTabKeyDown = (e) => {
@@ -299,11 +307,14 @@ function AuthScreen({ onAuth, sessionExpired }) {
     setSubmitting(true);
 
     const endpoint = isLogin ? "/api/accounts/login" : "/api/accounts/signup";
+    const payload = isLogin
+      ? { username, password }
+      : { username, password, first_name: firstName, last_name: lastName };
 
     fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(payload),
     })
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
@@ -313,7 +324,9 @@ function AuthScreen({ onAuth, sessionExpired }) {
       .then((data) => {
         localStorage.setItem("access_token", data.access_token);
         localStorage.setItem("username", data.username);
-        onAuth(data.username);
+        if (data.first_name) localStorage.setItem("first_name", data.first_name);
+        if (data.last_name) localStorage.setItem("last_name", data.last_name);
+        onAuth(data.username, data.first_name);
       })
       .catch((err) => setError(err.message))
       .finally(() => setSubmitting(false));
@@ -364,6 +377,37 @@ function AuthScreen({ onAuth, sessionExpired }) {
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit} aria-labelledby={isLogin ? "tab-login" : "tab-signup"} noValidate>
+          {!isLogin && (
+            <>
+              <div className="auth-field">
+                <label htmlFor="auth-first-name">First name</label>
+                <input
+                  id="auth-first-name"
+                  type="text"
+                  placeholder="Enter your first name"
+                  value={firstName}
+                  onChange={(e) => { setFirstName(e.target.value); setError(null); }}
+                  autoComplete="given-name"
+                  autoFocus
+                  required
+                />
+              </div>
+
+              <div className="auth-field">
+                <label htmlFor="auth-last-name">Last name</label>
+                <input
+                  id="auth-last-name"
+                  type="text"
+                  placeholder="Enter your last name"
+                  value={lastName}
+                  onChange={(e) => { setLastName(e.target.value); setError(null); }}
+                  autoComplete="family-name"
+                  required
+                />
+              </div>
+            </>
+          )}
+
           <div className="auth-field">
             <label htmlFor="auth-username">Username</label>
             <input
@@ -373,7 +417,7 @@ function AuthScreen({ onAuth, sessionExpired }) {
               value={username}
               onChange={(e) => { setUsername(e.target.value); setError(null); }}
               autoComplete="username"
-              autoFocus
+              autoFocus={isLogin}
               minLength={isLogin ? undefined : MIN_USERNAME_LENGTH}
               required
             />
@@ -461,6 +505,8 @@ function AuthScreen({ onAuth, sessionExpired }) {
               !username ||
               !password ||
               (!isLogin && (
+                !firstName ||
+                !lastName ||
                 username.length < MIN_USERNAME_LENGTH ||
                 password.length < MIN_PASSWORD_LENGTH ||
                 !confirmPassword ||
@@ -476,12 +522,53 @@ function AuthScreen({ onAuth, sessionExpired }) {
   );
 }
 
+// ---------- Welcome overlay ----------
+
+function WelcomeOverlay({ name }) {
+  const letters = capitalize(name).split("");
+  return (
+    <div className="welcome-overlay" role="status">
+      <span className="welcome-glow welcome-glow-a" aria-hidden="true" />
+      <span className="welcome-glow welcome-glow-b" aria-hidden="true" />
+
+      <div className="welcome-sparks" aria-hidden="true">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <span key={i} className="welcome-spark" />
+        ))}
+      </div>
+
+      <div className="welcome-content">
+        <div className="welcome-mark-wrap">
+          <span className="welcome-mark-ring" aria-hidden="true" />
+          <img className="welcome-mark" src="/logo.png" alt="" aria-hidden="true" />
+        </div>
+        <h1 className="welcome-text">
+          Welcome,{" "}
+          <span className="welcome-name">
+            {letters.map((char, i) => (
+              <span
+                key={i}
+                className="welcome-letter"
+                style={{ animationDelay: `${0.25 + i * 0.03}s` }}
+              >
+                {char === " " ? " " : char}
+              </span>
+            ))}
+          </span>
+        </h1>
+        <p className="welcome-sub">to your portfolio</p>
+      </div>
+    </div>
+  );
+}
+
 // ---------- Main App ----------
 
 function App() {
   // Auth state — seeded from localStorage so a page refresh stays logged in
   const [username, setUsername] = useState(() => localStorage.getItem("username") ?? null);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [welcomeName, setWelcomeName] = useState(null);
   const isLoggedIn = !!getToken() && !!username;
 
   useEffect(() => {
@@ -493,14 +580,20 @@ function App() {
     return () => window.removeEventListener("auth:expired", handleExpired);
   }, []);
 
-  const handleAuth = (uname) => {
+  const handleAuth = (uname, firstName) => {
     setSessionExpired(false);
     setUsername(uname);
+    if (firstName) {
+      setWelcomeName(firstName);
+      setTimeout(() => setWelcomeName(null), 3000);
+    }
   };
 
   const handleLogout = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("username");
+    localStorage.removeItem("first_name");
+    localStorage.removeItem("last_name");
     setUsername(null);
   };
 
@@ -508,7 +601,15 @@ function App() {
     return <AuthScreen onAuth={handleAuth} sessionExpired={sessionExpired} />;
   }
 
-  return <Dashboard username={username} onLogout={handleLogout} />;
+  return (
+    <>
+      {welcomeName ? (
+        <WelcomeOverlay name={welcomeName} />
+      ) : (
+        <Dashboard username={username} onLogout={handleLogout} />
+      )}
+    </>
+  );
 }
 
 // ---------- Dashboard (previously the App body) ----------
@@ -555,6 +656,17 @@ function Dashboard({ username, onLogout }) {
   const [cashTransactionsLoading, setCashTransactionsLoading] = useState(false);
   const [cashTransactionsError, setCashTransactionsError] = useState(null);
 
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [profileModalClosing, setProfileModalClosing] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const accountMenuRef = useRef(null);
+
+  const [editingName, setEditingName] = useState(false);
+  const [editFirstName, setEditFirstName] = useState("");
+  const [editLastName, setEditLastName] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState(null);
+
   const [performanceRange, setPerformanceRange] = useState("3M");
   const [performanceData, setPerformanceData] = useState([]);
   const [performanceLoading, setPerformanceLoading] = useState(false);
@@ -598,14 +710,34 @@ function Dashboard({ username, onLogout }) {
   }, []);
 
   useEffect(() => {
-    if (!(historyTicker || showRealizedModal || showCashModal)) return undefined;
+    if (!(historyTicker || showRealizedModal || showCashModal || showProfileModal)) return undefined;
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [historyTicker, showRealizedModal, showCashModal]);
+  }, [historyTicker, showRealizedModal, showCashModal, showProfileModal]);
+
+  useEffect(() => {
+    if (!showAccountMenu) return undefined;
+
+    const handleClickOutside = (e) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target)) {
+        setShowAccountMenu(false);
+      }
+    };
+    const handleEscape = (e) => {
+      if (e.key === "Escape") setShowAccountMenu(false);
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showAccountMenu]);
 
   useEffect(() => {
     if (activeView !== "performance") return undefined;
@@ -957,10 +1089,64 @@ function Dashboard({ username, onLogout }) {
     }, 180);
   };
 
-  // Initials from username for the avatar
-  const avatarLabel = username
-    ? username.slice(0, 2).toUpperCase()
-    : "??";
+  const closeProfileModal = () => {
+    setProfileModalClosing(true);
+    setTimeout(() => {
+      setShowProfileModal(false);
+      setProfileModalClosing(false);
+      setEditingName(false);
+      setNameError(null);
+    }, 180);
+  };
+
+  const firstName = localStorage.getItem("first_name");
+  const lastName = localStorage.getItem("last_name");
+  const fullName = [capitalize(firstName), capitalize(lastName)].filter(Boolean).join(" ") || username;
+  const avatarLabel = firstName && lastName
+    ? `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase()
+    : username
+      ? username.slice(0, 2).toUpperCase()
+      : "??";
+
+  const startEditingName = () => {
+    setEditFirstName(firstName || "");
+    setEditLastName(lastName || "");
+    setNameError(null);
+    setEditingName(true);
+  };
+
+  const cancelEditingName = () => {
+    setEditingName(false);
+    setNameError(null);
+  };
+
+  const saveName = (e) => {
+    e.preventDefault();
+    if (!editFirstName.trim() || !editLastName.trim()) {
+      setNameError("First and last name are required.");
+      return;
+    }
+    setNameSaving(true);
+    setNameError(null);
+
+    authFetch("/api/accounts/name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ first_name: editFirstName.trim(), last_name: editLastName.trim() }),
+    })
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+        return body;
+      })
+      .then((data) => {
+        localStorage.setItem("first_name", data.first_name);
+        localStorage.setItem("last_name", data.last_name);
+        setEditingName(false);
+      })
+      .catch((err) => setNameError(err.message))
+      .finally(() => setNameSaving(false));
+  };
 
   return (
     <div className="app-shell">
@@ -990,19 +1176,49 @@ function Dashboard({ username, onLogout }) {
             Performance
           </button>
 
-          <div className="nav-user">
-            <div className="avatar" aria-label={`${username} profile`} title={username}>
-              {avatarLabel}
-            </div>
+          <div className="nav-user" ref={accountMenuRef}>
             <button
-              id="logout-btn"
               type="button"
-              className="logout-btn"
-              onClick={onLogout}
-              title="Sign out"
+              className="avatar"
+              onClick={() => setShowAccountMenu((v) => !v)}
+              aria-label={`${username} account menu`}
+              aria-haspopup="menu"
+              aria-expanded={showAccountMenu}
+              title="Account menu"
             >
-              Sign out
+              {avatarLabel}
             </button>
+
+            {showAccountMenu && (
+              <div className="account-menu" role="menu">
+                <div className="account-menu-header">
+                  <p className="account-menu-welcome">Welcome,</p>
+                  <p className="account-menu-name">{fullName}</p>
+                </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="account-menu-item"
+                  onClick={() => {
+                    setShowAccountMenu(false);
+                    setShowProfileModal(true);
+                  }}
+                >
+                  Manage Account
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="account-menu-item account-menu-item-danger"
+                  onClick={() => {
+                    setShowAccountMenu(false);
+                    onLogout();
+                  }}
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </nav>
       </header>
@@ -1527,6 +1743,70 @@ function Dashboard({ username, onLogout }) {
                         </tbody>
                       </table>
                     )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showProfileModal && (
+              <div className={`modal-overlay ${profileModalClosing ? "closing" : ""}`} onClick={closeProfileModal}>
+                <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <div>
+                      <h3>Profile</h3>
+                      <p>Your account details</p>
+                    </div>
+                    <button type="button" className="modal-close" onClick={closeProfileModal} aria-label="Close">
+                      &times;
+                    </button>
+                  </div>
+
+                  <div className="modal-body">
+                    <div className="profile-hero">
+                      <div className="profile-avatar">{avatarLabel}</div>
+
+                      {editingName ? (
+                        <form className="profile-name-form" onSubmit={saveName}>
+                          <input
+                            type="text"
+                            value={editFirstName}
+                            onChange={(e) => { setEditFirstName(e.target.value); setNameError(null); }}
+                            placeholder="First name"
+                            autoFocus
+                            required
+                          />
+                          <input
+                            type="text"
+                            value={editLastName}
+                            onChange={(e) => { setEditLastName(e.target.value); setNameError(null); }}
+                            placeholder="Last name"
+                            required
+                          />
+                          {nameError && <p className="error">{nameError}</p>}
+                          <div className="profile-name-actions">
+                            <button type="button" onClick={cancelEditingName} disabled={nameSaving}>
+                              Cancel
+                            </button>
+                            <button type="submit" disabled={nameSaving || !editFirstName.trim() || !editLastName.trim()}>
+                              {nameSaving ? "Saving..." : "Save"}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <h2 className="profile-name">{fullName}</h2>
+                          <button type="button" className="profile-edit-name" onClick={startEditingName}>
+                            Edit name
+                          </button>
+                        </>
+                      )}
+
+                      <p className="profile-username">@{username}</p>
+                    </div>
+
+                    <button type="button" className="profile-signout" onClick={onLogout}>
+                      Sign out
+                    </button>
                   </div>
                 </div>
               </div>
