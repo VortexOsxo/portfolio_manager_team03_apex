@@ -7,7 +7,7 @@ from threading import Lock
 import mysql.connector
 
 from flaskr.services import performance
-from flaskr.yahoo_finance import YahooFinanceStock
+from flaskr.services.yahoo_finance import YahooFinanceStock
 
 _PERFORMANCE_CACHE = {}
 _PERFORMANCE_CACHE_LOCK = Lock()

@@ -4,8 +4,8 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from flaskr import yahoo_finance
-from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
+from flaskr.services import yahoo_finance
+from flaskr.services.yahoo_finance import YahooFinanceStock, search_stocks
 
 
 @pytest.fixture(autouse=True)

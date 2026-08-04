@@ -9,7 +9,7 @@ from flaskr.services.database import (
     get_portfolio_performance, get_account_balance
 )
 from flaskr.services import performance
-from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
+from flaskr.services.yahoo_finance import YahooFinanceStock, search_stocks
 
 stocks_bp = Blueprint("stocks", __name__, url_prefix="/stocks")
 
