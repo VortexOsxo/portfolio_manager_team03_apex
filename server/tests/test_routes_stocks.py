@@ -207,7 +207,7 @@ class TestSingleTickerPerformanceRoute:
         assert response.status_code == 500
         assert "does not match format" in response.get_json()["error"]
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_reversed_range_crashes_on_a_non_datetime_index(self, mock_ticker_cls, client):
         # Real yfinance rejects start > end and comes back with an empty
         # DataFrame carrying a plain Index rather than a DatetimeIndex, so

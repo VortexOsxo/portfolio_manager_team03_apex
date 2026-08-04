@@ -4,7 +4,7 @@
 def compute_positions(transactions):
     """Walk transactions in chronological order, tracking running average cost
     per ticker under the average-cost method. """
-    ordered = sorted(transactions, key=lambda tx: (tx['transaction_date'], tx.get('tr_id', 0)))
+    ordered = _sort_transactions(transactions)
 
     shares_held = {}
     avg_cost = {}
@@ -14,16 +14,14 @@ def compute_positions(transactions):
         ticker = tx['ticker']
         amount = float(tx['amount'])
         price = float(tx['cost_basis'])
-        held = shares_held.get(ticker, 0.0)
+
+        held = shares_held.get(ticker, 0.0) + amount
         cost = avg_cost.get(ticker, 0.0)
 
         if amount > 0:
-            held += amount
             cost = (cost * (held - amount) + price * amount) / held
         else:
-            sold = -amount
-            realized[ticker] = realized.get(ticker, 0) + (price - cost) * sold
-            held += amount
+            realized[ticker] = realized.get(ticker, 0) + (price - cost) * abs(amount)
 
         shares_held[ticker] = held
         avg_cost[ticker] = cost
@@ -38,7 +36,7 @@ def compute_positions(transactions):
 
 def compute_realized_lots(transactions):
     """Same walk as compute_positions, but emits one record per sell instead of a per-ticker total."""
-    ordered = sorted(transactions, key=lambda tx: (tx['transaction_date'], tx.get('tr_id', 0)))
+    ordered = _sort_transactions(transactions)
 
     shares_held = {}
     avg_cost = {}
@@ -48,11 +46,10 @@ def compute_realized_lots(transactions):
         ticker = tx['ticker']
         amount = float(tx['amount'])
         price = float(tx['cost_basis'])
-        held = shares_held.get(ticker, 0.0)
+        held = shares_held.get(ticker, 0.0) + amount
         cost = avg_cost.get(ticker, 0.0)
 
         if amount > 0:
-            held += amount
             cost = (cost * (held - amount) + price * amount) / held
         else:
             sold = -amount
@@ -64,7 +61,6 @@ def compute_realized_lots(transactions):
                 'sale_price': price,
                 'pnl': round((price - cost) * sold, 2),
             })
-            held += amount
 
         shares_held[ticker] = held
         avg_cost[ticker] = cost
@@ -96,22 +92,12 @@ def day_change(amount_held, day_change_per_share, day_change_pct):
     }
 
 
-def _date_key(value):
-    """Normalize database datetimes and API date strings for comparison."""
-    if hasattr(value, "strftime"):
-        return value.strftime("%Y-%m-%d")
-    return str(value)[:10]
-
-
 def get_tickers_for_range(start_date, end_date, transactions):
     """Return tickers that can have a non-zero position during a date range."""
     holdings_at_start = {}
     tickers = set()
 
-    for transaction in sorted(
-        transactions,
-        key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
-    ):
+    for transaction in _sort_transactions(transactions):
         transaction_date = _date_key(transaction["transaction_date"])
         ticker = transaction["ticker"]
         amount = float(transaction["amount"])
@@ -138,10 +124,7 @@ def compute_portfolio_values(dates, transactions, ticker_values):
     not necessarily a market holiday) holds its last known price rather than
     dropping to $0 for that day.
     """
-    ordered_transactions = sorted(
-        transactions,
-        key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
-    )
+    ordered_transactions = _sort_transactions(transactions)
     holdings = {}
     last_known_price = {}
     transaction_index = 0
@@ -175,10 +158,7 @@ def compute_portfolio_values(dates, transactions, ticker_values):
 
 
 def compute_cash_balances(dates, transactions):
-    ordered = sorted(
-        transactions,
-        key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
-    )
+    ordered = _sort_transactions(transactions)
     running_cash = 0.0
     tx_index = 0
     balances = []
@@ -198,8 +178,6 @@ def compute_cash_balances(dates, transactions):
             elif tx_type == "withdrawal":
                 running_cash -= amount
             else:
-                # buy:  amount positive  → delta is negative (cash out)
-                # sell: amount negative  → delta is positive (cash in)
                 if cost_basis is not None:
                     running_cash -= amount * float(cost_basis)
 
@@ -208,3 +186,15 @@ def compute_cash_balances(dates, transactions):
         balances.append(round(running_cash, 2))
 
     return balances
+
+def _date_key(value):
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    return str(value)[:10]
+
+
+def _sort_transactions(transactions):
+    return sorted(
+        transactions,
+        key=lambda tx: (_date_key(tx["transaction_date"]), tx.get("tr_id", 0)),
+    )
