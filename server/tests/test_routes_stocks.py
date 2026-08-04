@@ -254,12 +254,12 @@ class TestBuyRoute:
 
         assert response.status_code == 500
 
-    def test_zero_amount_is_silently_accepted(self, client, mock_db_conn):
+    def test_zero_amount_is_refused(self, client, mock_db_conn):
         mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
 
         response = client.post("/stocks/buy", json={"ticker": "AAPL", "amount": 0, "cost_basis": 100})
 
-        assert response.status_code == 201
+        assert response.status_code == 400
 
     def test_negative_cost_basis_is_silently_accepted(self, client, mock_db_conn):
         mock_db_conn.return_value.cursor.return_value.fetchone.return_value = (Decimal("30000.00"),)
