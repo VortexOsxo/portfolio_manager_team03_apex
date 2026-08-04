@@ -3,17 +3,7 @@
 
 def compute_positions(transactions):
     """Walk transactions in chronological order, tracking running average cost
-    per ticker under the average-cost method.
-
-    A buy blends into the average cost of shares currently held; a sell is
-    realized against that running average and leaves it unchanged. Processing
-    must happen in transaction order, since the average cost after a sell
-    followed by a new buy differs from an all-time average across every buy
-    ever made.
-
-    Returns (avg_cost_by_ticker, realized_pnl_by_ticker). avg_cost_by_ticker
-    only includes tickers with a currently open position.
-    """
+    per ticker under the average-cost method. """
     ordered = sorted(transactions, key=lambda tx: (tx['transaction_date'], tx.get('tr_id', 0)))
 
     shares_held = {}

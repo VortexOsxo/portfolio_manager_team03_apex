@@ -89,13 +89,7 @@ def get_account_balance(account_id):
 
 
 def update_account_balance(amount, account_id=1, cursor=None):
-    """Debit/credit the account balance.
-
-    Pass an existing `cursor` to run this as part of a caller's transaction
-    (e.g. one already holding a `SELECT ... FOR UPDATE` lock on the row) so
-    the update is covered by that lock instead of committing independently
-    on its own connection.
-    """
+    """Debit/credit the account balance."""
     amount = Decimal(str(amount))
     query = "UPDATE accounts SET balance = balance + %s WHERE id = %s;"
     params = (amount, account_id)
