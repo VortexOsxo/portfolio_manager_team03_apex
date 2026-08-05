@@ -38,13 +38,7 @@ def signup():
         return jsonify({"error": "Username already taken"}), 409
 
     user = get_user(username)
-    access_token = create_access_token(identity=str(user['id']))
-    return jsonify({
-        "access_token": access_token,
-        "username": user['username'],
-        "first_name": user['first_name'],
-        "last_name": user['last_name'],
-    }), 201
+    return _build_auth_response(user), 201
 
 
 @accounts_bp.post("/login")
@@ -62,13 +56,7 @@ def login():
     if user is None or not check_password_hash(user.get('password'), password):
         return jsonify({"error": "Invalid username or password"}), 401
 
-    access_token = create_access_token(identity=str(user['id']))
-    return jsonify({
-        "access_token": access_token,
-        "username": user['username'],
-        "first_name": user['first_name'],
-        "last_name": user['last_name'],
-    }), 200
+    return _build_auth_response(user), 200
 
 
 @accounts_bp.patch("/name")
@@ -130,7 +118,6 @@ def withdraw():
     amount, error = _parse_amount(data)
     if error:
         return jsonify({"error": error}), 400
-
     try:
         withdraw_cash(account_id, amount)
     except ValueError as e:
@@ -138,6 +125,15 @@ def withdraw():
 
     balance = get_account_balance(account_id)
     return jsonify({"account_id": account_id, "balance": float(balance)}), 201
+
+def _build_auth_response(user):
+    access_token = create_access_token(identity=str(user['id']))
+    return jsonify({
+        "access_token": access_token,
+        "username": user['username'],
+        "first_name": user['first_name'],
+        "last_name": user['last_name'],
+    })
 
 
 def _parse_amount(data):

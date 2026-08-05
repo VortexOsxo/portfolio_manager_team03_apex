@@ -7,7 +7,7 @@ from threading import Lock
 import mysql.connector
 
 from flaskr.services import performance
-from flaskr.yahoo_finance import YahooFinanceStock
+from flaskr.services.yahoo_finance import YahooFinanceStock
 
 _PERFORMANCE_CACHE = {}
 _PERFORMANCE_CACHE_LOCK = Lock()
@@ -101,10 +101,12 @@ def update_account_balance(amount, account_id=1, cursor=None):
 
 
 def buy_holding(account_id, ticker, amount, cost_basis=None, transaction_date=None):
-    amount = abs(Decimal(str(amount)))
+    amount = Decimal(str(amount))
 
-    if amount == 0:
+    if amount <= 0:
         raise ValueError("amount must be greater than zero")
+
+    amount = abs(amount)
 
     if len(ticker) > 10:
         raise ValueError(f"ticker must be at most 10 characters, got {len(ticker)}")

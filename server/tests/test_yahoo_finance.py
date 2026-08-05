@@ -4,8 +4,8 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from flaskr import yahoo_finance
-from flaskr.yahoo_finance import YahooFinanceStock, search_stocks
+from flaskr.services import yahoo_finance
+from flaskr.services.yahoo_finance import YahooFinanceStock, search_stocks
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +18,7 @@ def clear_info_cache():
 
 
 class TestGetInfo:
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_maps_yahoo_fields(self, mock_ticker_cls):
         mock_ticker_cls.return_value.info = {
             "longName": "Apple Inc.",
@@ -37,7 +37,7 @@ class TestGetInfo:
             "day_change_pct": 1.7,
         }
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_falls_back_to_short_name_and_regular_market_price(self, mock_ticker_cls):
         mock_ticker_cls.return_value.info = {
             "shortName": "Apple",
@@ -49,7 +49,7 @@ class TestGetInfo:
         assert info["company_name"] == "Apple"
         assert info["current_price"] == 149.0
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_second_call_within_ttl_is_served_from_cache(self, mock_ticker_cls):
         mock_ticker_cls.return_value.info = {"currentPrice": 100.0}
         YahooFinanceStock("AAPL").get_info()
@@ -61,7 +61,7 @@ class TestGetInfo:
 
         assert info["current_price"] == 100.0
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_expired_cache_entry_is_refetched(self, mock_ticker_cls):
         mock_ticker_cls.return_value.info = {"currentPrice": 100.0}
         stock = YahooFinanceStock("AAPL")
@@ -78,7 +78,7 @@ class TestGetInfo:
 
 
 class TestGetPriceOnDate:
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_returns_close_price_for_string_date(self, mock_ticker_cls):
         mock_ticker_cls.return_value.history.return_value = pd.DataFrame({"Close": [123.45]})
 
@@ -88,7 +88,7 @@ class TestGetPriceOnDate:
         called_start = mock_ticker_cls.return_value.history.call_args.kwargs["start"]
         assert called_start == datetime(2024, 1, 2)
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_returns_none_when_market_was_closed(self, mock_ticker_cls):
         mock_ticker_cls.return_value.history.return_value = pd.DataFrame({"Close": []})
 
@@ -98,7 +98,7 @@ class TestGetPriceOnDate:
 
 
 class TestGetDailyValues:
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_returns_date_price_map_for_trading_days(self, mock_ticker_cls):
         index = pd.to_datetime(["2026-01-02", "2026-01-05"])
         mock_ticker_cls.return_value.history.return_value = pd.DataFrame(
@@ -109,7 +109,7 @@ class TestGetDailyValues:
 
         assert values == {"2026-01-02": 100.0, "2026-01-05": 105.0}
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_returns_empty_dict_when_history_is_empty(self, mock_ticker_cls):
         # Covers both "empty date range" and "unknown ticker" -- yfinance
         # surfaces both the same way, as an empty history DataFrame.
@@ -121,7 +121,7 @@ class TestGetDailyValues:
 
 
 class TestGetMarketTradingDays:
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_returns_trading_days_as_strings(self, mock_ticker_cls):
         index = pd.to_datetime(["2026-01-02", "2026-01-05", "2026-01-06"])
         mock_ticker_cls.return_value.history.return_value = pd.DataFrame(
@@ -133,7 +133,7 @@ class TestGetMarketTradingDays:
         assert days == ["2026-01-02", "2026-01-05", "2026-01-06"]
         mock_ticker_cls.assert_called_once_with("^GSPC")
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_returns_empty_list_for_a_weekend_only_range(self, mock_ticker_cls):
         # An empty history from yfinance still carries a DatetimeIndex (just
         # empty), not a plain RangeIndex -- match that shape here.
@@ -145,7 +145,7 @@ class TestGetMarketTradingDays:
 
         assert days == []
 
-    @patch("flaskr.yahoo_finance.yf.Ticker")
+    @patch("flaskr.services.yahoo_finance.yf.Ticker")
     def test_does_not_validate_start_is_before_end(self, mock_ticker_cls):
         # Characterizes current behavior: a reversed range is passed straight
         # through to yfinance with no swap or rejection.
@@ -161,7 +161,7 @@ class TestGetMarketTradingDays:
 
 
 class TestGetDailyValuesForTickers:
-    @patch("flaskr.yahoo_finance.yf.download")
+    @patch("flaskr.services.yahoo_finance.yf.download")
     def test_fetches_multiple_tickers_in_one_download(self, download):
         index = pd.to_datetime(["2026-01-02", "2026-01-05"])
         columns = pd.MultiIndex.from_tuples([
@@ -186,7 +186,7 @@ class TestGetDailyValuesForTickers:
         }
         download.assert_called_once()
 
-    @patch("flaskr.yahoo_finance.yf.download")
+    @patch("flaskr.services.yahoo_finance.yf.download")
     def test_single_ticker_flat_columns_are_handled(self, download):
         # yfinance often returns flat (non-MultiIndex) columns when only one
         # ticker is requested -- this exercises the fallback branch that
@@ -207,7 +207,7 @@ class TestGetDailyValuesForTickers:
 
         assert result == {"AAPL": {"2026-01-02": 100.0, "2026-01-05": 105.0}}
 
-    @patch("flaskr.yahoo_finance.yf.download")
+    @patch("flaskr.services.yahoo_finance.yf.download")
     def test_missing_close_column_yields_empty_dict_for_that_ticker(self, download):
         index = pd.to_datetime(["2026-01-02"])
         download.return_value = pd.DataFrame({"Foo": [1]}, index=index)
@@ -218,7 +218,7 @@ class TestGetDailyValuesForTickers:
 
 
 class TestSearchStocks:
-    @patch("flaskr.yahoo_finance.yf.Search")
+    @patch("flaskr.services.yahoo_finance.yf.Search")
     def test_filters_to_equities_and_maps_fields(self, mock_search_cls):
         mock_search_cls.return_value.quotes = [
             {"symbol": "AAPL", "shortname": "Apple Inc.", "quoteType": "EQUITY"},
@@ -232,13 +232,13 @@ class TestSearchStocks:
     def test_blank_query_returns_empty_without_calling_yahoo(self):
         assert search_stocks("   ") == []
 
-    @patch("flaskr.yahoo_finance.yf.Search")
+    @patch("flaskr.services.yahoo_finance.yf.Search")
     def test_yahoo_error_returns_empty_list(self, mock_search_cls):
         mock_search_cls.side_effect = RuntimeError("network down")
 
         assert search_stocks("apple") == []
 
-    @patch("flaskr.yahoo_finance.yf.Search")
+    @patch("flaskr.services.yahoo_finance.yf.Search")
     def test_falls_back_to_symbol_when_no_name_present(self, mock_search_cls):
         mock_search_cls.return_value.quotes = [{"symbol": "AAPL", "quoteType": "EQUITY"}]
 
