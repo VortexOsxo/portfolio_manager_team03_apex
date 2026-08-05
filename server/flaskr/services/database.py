@@ -254,6 +254,7 @@ def sell_holding(account_id, ticker, amount, cost_basis=None, transaction_date=N
         # concurrent sells can no longer both read the same current_amount
         # and jointly oversell the position.
         cursor.execute("SELECT balance FROM accounts WHERE id = %s FOR UPDATE", (account_id,))
+        cursor.fetchone()
 
         current_amount = Decimal(str(get_holding_amount(account_id, ticker)))
         if amount > current_amount:
