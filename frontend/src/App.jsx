@@ -1233,7 +1233,7 @@ function Dashboard({ username, onLogout }) {
 
             <section className="summary-grid" aria-label="Portfolio summary">
               <article className="summary-card">
-                <p className="summary-label">Total value</p>
+                <p className="summary-label">Stock value</p>
                 {loading && !summary ? (
                   <p className="summary-value"><span className="skeleton-block" style={{ width: "90px", height: "22px" }} /></p>
                 ) : (
