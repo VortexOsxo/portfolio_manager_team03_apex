@@ -66,15 +66,12 @@ class TestBuyHolding:
         assert insert_params == (ACCOUNT_ID, "AAPL", 10, 175.0, date(2024, 1, 1))
 
     @patch("flaskr.services.database.get_db_connection")
-    def test_negative_amount_is_stored_as_positive(self, mock_get_db_connection):
+    def test_negative_amount_raises(self, mock_get_db_connection):
         mock_cursor = mock_get_db_connection.return_value.cursor.return_value
         mock_cursor.fetchone.return_value = (Decimal("30000.00"),)
 
-        database.buy_holding(ACCOUNT_ID, "AAPL", -10, cost_basis=150.0, transaction_date=date(2024, 1, 1))
-
-        # amount is at index 2 in the INSERT params (account_id, ticker, amount, ...)
-        insert_params = mock_cursor.execute.call_args_list[1][0][1]
-        assert insert_params[2] == 10
+        with pytest.raises(ValueError, match="amount must be greater than zero"):
+            database.buy_holding(ACCOUNT_ID, "AAPL", -10, cost_basis=150.0, transaction_date=date(2024, 1, 1))
 
     @patch("flaskr.services.database.YahooFinanceStock")
     @patch("flaskr.services.database.get_db_connection")
